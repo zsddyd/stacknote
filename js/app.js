@@ -371,31 +371,30 @@
 
   // ============ 工具栏 ============
   const TB = {
-    new: { t: "新建(Ctrl+T)", g: "✚", a: () => cmd.new() },
+    new: { t: "新建(Ctrl+T)", g: "📄", a: () => cmd.new() },
     open: { t: "打开", g: "📂", a: () => cmd.open("auto") },
     save: { t: "保存", g: "💾", a: () => cmd.save() },
     saveall: { t: "全部保存", g: "💿", a: () => cmd.saveAll() },
-    close: { t: "关闭", g: "✖", a: () => cmd.closeTab() },
+    close: { t: "关闭", g: "❌", a: () => cmd.closeTab() },
     closeall: { t: "关闭全部", g: "🗑", a: () => cmd.closeAll() },
     sep1: "-",
-    cut: { t: "剪切", g: "✂", a: () => execNative("cut") },
-    copy: { t: "复制", g: "⧉", a: () => execNative("copy") },
+    cut: { t: "剪切", g: "✂️", a: () => execNative("cut") },
+    copy: { t: "复制", g: "📑", a: () => execNative("copy") },
     paste: { t: "粘贴", g: "📋", a: () => execNative("paste") },
     sep2: "-",
-    undo: { t: "撤销", g: "↩", a: () => edCmd("undo") },
-    redo: { t: "重做", g: "↪", a: () => edCmd("redo") },
+    undo: { t: "撤销", g: "↺", a: () => edCmd("undo") },
+    redo: { t: "重做", g: "↻", a: () => edCmd("redo") },
     sep3: "-",
     find: { t: "查找", g: "🔍", a: () => dlg.find("find") },
     replace: { t: "替换", g: "🔁", a: () => dlg.find("replace") },
-    mark: { t: "全部标记", g: "🖍", a: () => cmd.markAll() },
+    mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",
-    zoomin: { t: "放大", g: "＋", a: () => cmd.zoom(10) },
-    zoomout: { t: "缩小", g: "－", a: () => cmd.zoom(-10) },
+    zoomin: { t: "放大", g: "➕", a: () => cmd.zoom(10) },
+    zoomout: { t: "缩小", g: "➖", a: () => cmd.zoom(-10) },
     sep5: "-",
     wrap: { t: "自动换行", g: "⇆", toggle: () => app.settings.wrap, a: () => cmd.toggleWrap() },
-    blank: { t: "显示空白/制表符", g: "␣", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() },
-    tail: { t: "（tail/外部监控在纯前端不可用）", g: "⊚", disabled: true }
+    blank: { t: "显示空白/制表符", g: "␣", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() }
   };
   function buildToolbar() {
     toolbar.textContent = "";
