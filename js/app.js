@@ -23,7 +23,7 @@
     showEol: false,
     restoreSession: true,
     autoSave: true,
-    bigThresholdMB: 6,        // 超过该大小(默认6MB)打开为“大文本只读/虚拟滚动”
+    bigThresholdMB: 2,        // 超过该大小(默认2MB)打开为“大文本只读/虚拟滚动”
     wordDblHighlight: true,
     webAddrHighlight: false,
     markColorIdx: 0,
@@ -629,7 +629,7 @@
       const size = file.size;
       const det = SN.detectEncode(bytes);
       const hasNul = bytes.slice(0, Math.min(bytes.length, 4096)).some(b => b === 0);
-      const bigLimit = Math.max(2, app.settings.bigThresholdMB || 6) * 1024 * 1024;
+      const bigLimit = Math.max(2, app.settings.bigThresholdMB || 2) * 1024 * 1024;
       const isBig = size > bigLimit;
       let kind = "text";
       if (mode === "hex") kind = "hex";
@@ -957,8 +957,8 @@
   app.boot = async function () {
     const saved = await SN.store.kvGet("settings", null);
     app.settings = Object.assign({}, SETTINGS_DEFAULT, saved || {});
-    // 旧版本默认值 100MB 会绕过大文本虚拟视图，自动修正为新默认 6MB
-    if (app.settings.bigThresholdMB === 100) app.settings.bigThresholdMB = 6;
+    // 旧版本默认值 100MB 会绕过大文本虚拟视图，自动修正为新默认 2MB
+    if (app.settings.bigThresholdMB === 100) app.settings.bigThresholdMB = 2;
     app.curMarkColor = app.MARK_COLORS[app.settings.markColorIdx || 0] || app.MARK_COLORS[0];
     SN.applyAppSkin(app.settings.appSkin);
     SN.applyEditorTheme(app.settings.editorTheme);

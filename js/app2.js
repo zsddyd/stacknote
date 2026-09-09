@@ -1065,7 +1065,7 @@ SN.openModal({
         boxes.forEach(x => grid.appendChild(x));
         b.appendChild(grid);
         b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "大文本虚拟只读阈值(MB)" }), numIn("optBig", s.bigThresholdMB, 2, 500)]));
-        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 6MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，用“以文本模式打开”强制可编辑（大文件会较慢）。" }));
+        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 2MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，用“以文本模式打开”强制可编辑（大文件会较慢）。" }));
         function sel(id, opts, val) { const s2 = el("select", { id }); opts.forEach(o => s2.appendChild(el("option", { value: o[0], text: o[1], selected: o[0] === val }))); return s2; }
         function numIn(id, val, min, max) { return el("input", { type: "number", id, value: val, min, max, style: "width:90px" }); }
         function chk(id, label, v) { return el("label", {}, [el("input", { type: "checkbox", id, checked: v }), " " + label]); }
@@ -1078,7 +1078,7 @@ SN.openModal({
           s2.restoreSession = !!$("#optRestore") && $("#optRestore").checked;
           s2.autoSave = !!$("#optAuto") && $("#optAuto").checked;
           s2.wordDblHighlight = !!$("#optWord") && $("#optWord").checked;
-          s2.bigThresholdMB = parseInt($("#optBig").value, 10) || 100;
+          s2.bigThresholdMB = parseInt($("#optBig").value, 10) || 2;
           SN.applyAppSkin(s2.appSkin);
           SN.applyEditorTheme(s2.editorTheme);
           SN.saveSettings();
