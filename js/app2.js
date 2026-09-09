@@ -861,7 +861,7 @@
     { id: "b64d", name: "Base64 解码", desc: "把选中文本/全文解码", code: "text => decodeURIComponent(escape(atob(text.trim())))" },
     { id: "url", name: "URL 编码", desc: "encodeURIComponent", code: "text => encodeURIComponent(text)" },
     { id: "urld", name: "URL 解码", desc: "decodeURIComponent", code: "text => decodeURIComponent(text)" },
-    { id: "uuid", name: "插入 UUID", desc: "在光标处插入随机 UUID", code: "text => { const u = crypto.randomUUID(); const s = SN.activeEditor().caret(); return text.slice(0,s) + u + text.slice(SN.activeEditor().selEnd); }", insert: true },
+    { id: "uuid", name: "插入 UUID", desc: "在光标处插入随机 UUID", code: "text => { const u = SN.uuid(); const s = SN.activeEditor().caret(); return text.slice(0,s) + u + text.slice(SN.activeEditor().selEnd); }", insert: true },
     { id: "ts", name: "插入时间戳", desc: "在光标处插入当前时间", code: "text => { const s = new Date().toLocaleString(); const c = SN.activeEditor().caret(); return text.slice(0,c) + s + text.slice(SN.activeEditor().selEnd); }", insert: true }
   ];
 
@@ -882,11 +882,20 @@
   }
   function runPlugin(p) {
     try {
-      let fn;
-      if (p.code) fn = new Function("SN", "text", "return (" + p.code + ")(text);");
       const ed = SN.activeEditor();
       if (!ed) { setMsg("没有活动文档"); return; }
+      let fn;
+      if (p.code) fn = new Function("SN", "text", "return (" + p.code + ")(text);");
       const start = ed.selStart, end = ed.selEnd;
+      if (p.insert) {
+        // 插入型插件：基于全文在光标处插入（有选区则替换选区），光标移到插入内容之后
+        const out = fn(SN, ed.text);
+        if (typeof out !== "string") { setMsg("插件未返回文本"); return; }
+        const pos = Math.max(0, start + (out.length - ed.text.length));
+        mutateDocText(() => out, [pos, pos]);
+        setMsg("插件执行完成：" + p.name);
+        return;
+      }
       const target = ed.hasSelection() ? ed.selectedText() : ed.text;
       const out = fn(SN, target);
       if (typeof out !== "string") { setMsg("插件未返回文本"); return; }

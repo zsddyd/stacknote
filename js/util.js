@@ -48,6 +48,18 @@
     if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
     return n + " B";
   }
+  // UUID v4：优先 WebCrypto，兼容非安全上下文（http/file）或旧浏览器则用 Math.random 兜底
+  function uuid() {
+    const c = window.crypto;
+    if (c && typeof c.randomUUID === "function") return c.randomUUID();
+    const b = new Uint8Array(16);
+    if (c && typeof c.getRandomValues === "function") c.getRandomValues(b);
+    else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+    b[6] = (b[6] & 0x0f) | 0x40;   // version 4
+    b[8] = (b[8] & 0x3f) | 0x80;   // variant 10xx
+    const h = Array.prototype.map.call(b, x => (x < 16 ? "0" : "") + x.toString(16)).join("");
+    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+  }
 
   function splitLinesKeep(text) {
     // 按行拆分，保留行内容(不含换行)，返回 {lines, ends}
@@ -117,7 +129,7 @@
 
   SN.$ = $; SN.$$ = $$; SN.el = el; SN.escapeHtml = escapeHtml;
   SN.uid = uid; SN.debounce = debounce; SN.clamp = clamp;
-  SN.fmtSize = fmtSize; SN.splitLinesKeep = splitLinesKeep;
+  SN.fmtSize = fmtSize; SN.splitLinesKeep = splitLinesKeep; SN.uuid = uuid;
   SN.countLines = countLines; SN.lineAt = lineAt; SN.positionToLineCol = positionToLineCol;
   SN.readAsBytes = readAsBytes; SN.readAsTextBytes = readAsTextBytes; SN.download = download;
   SN.on = on; SN.off = off; SN.emit = emit;

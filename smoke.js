@@ -127,6 +127,7 @@ assert(SN && SN.app && SN.app.boot, "app.boot 存在");
 assert(SN.encodeText("中文测试", "utf8bom")[0] === 0xef, "utf8bom");
 assert(SN.detectEncode(SN.encodeText("你好", "utf8")).id === "utf8", "detect utf8");
 assert(SN.md5(new TextEncoder().encode("abc")) === "900150983cd24fb0d6963f7d28e17f72", "md5 abc");
+assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(SN.uuid()), "uuid v4");
 assert(SN.textops.caseText("hello", "upper") === "HELLO", "case");
 assert(SN.highlightRender("// hi\nint a = 1;", "cpp", []).length > 0, "highlight");
 
