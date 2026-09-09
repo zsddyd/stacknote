@@ -113,7 +113,7 @@ const files = [
   "js/util.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
-  "js/textops.js", "js/diff.js", "js/app.js", "js/app2.js"
+  "js/textops.js", "js/app.js", "js/app2.js"
 ];
 for (const f of files) {
   const code = fs.readFileSync(path.join(__dirname, f), "utf8");
@@ -127,7 +127,6 @@ assert(SN && SN.app && SN.app.boot, "app.boot 存在");
 assert(SN.encodeText("中文测试", "utf8bom")[0] === 0xef, "utf8bom");
 assert(SN.detectEncode(SN.encodeText("你好", "utf8")).id === "utf8", "detect utf8");
 assert(SN.md5(new TextEncoder().encode("abc")) === "900150983cd24fb0d6963f7d28e17f72", "md5 abc");
-assert(SN.diffBuildSides(SN.diffLines("a\nb", "a\nc")).left.length >= 2, "diff");
 assert(SN.textops.caseText("hello", "upper") === "HELLO", "case");
 assert(SN.highlightRender("// hi\nint a = 1;", "cpp", []).length > 0, "highlight");
 

@@ -259,10 +259,6 @@
         "-",
         { label: "统计选中行/字数", action: () => cmd.edStatus() }
       ]},
-      { label: "对比", items: [
-        { label: "两文档对比…", action: () => dlg.compare() },
-        { label: "说明：目录/二进制对比需后端文件系统，本页不支持", disabled: true }
-      ]},
       { label: "插件", items: SN.pluginMenuItems() },
       { label: "关于", items: [{ label: "关于 StackNote", action: () => dlg.about() }] }
     ];

@@ -728,7 +728,7 @@
 })();
 
 // =====================================================================
-//  第二段：工具 / 插件 / 选项 / 主题 / 列块 / 对比 / 关于 / 启动
+//  第二段：工具 / 插件 / 选项 / 主题 / 列块 / 关于 / 启动
 // =====================================================================
 (function () {
   const SN = window.SN;
@@ -1002,12 +1002,12 @@
           "18 套编辑器主题 + 明暗皮肤",
           "会话恢复",
           "MD5/SHA、XML/JSON 格式化",
-          "列块编辑、双文档对比、Markdown 预览、插件（JS 脚本）"
+          "列块编辑、Markdown 预览、插件（JS 脚本）"
         ];
         feats.forEach(t => b.appendChild(el("div", { class: "about-li", text: t })));
 
         b.appendChild(el("div", { class: "about-sec", text: "浏览器限制" }));
-        b.appendChild(el("div", { class: "about-li", text: "无法监控本地文件变化、目录遍历对比、GBK 写出、系统右键/管理员提权。" }));
+        b.appendChild(el("div", { class: "about-li", text: "无法监控本地文件变化、GBK 写出、系统右键/管理员提权。" }));
         b.appendChild(el("div", { class: "about-li", text: "文件需通过文件选择器/拖拽打开（支持 File System Access 浏览器可直接保存回原文件）。" }));
       }
     });
@@ -1177,60 +1177,6 @@ SN.openModal({
       idx++;
     }
     return { text: lines.join("\n"), sel: [0, 0] };
-  }
-
-  // ================= 对比 =================
-  dlg.compare = function () {
-    const txtDocs = app.docs.filter(d => d.kind === "text" && !d.readOnly);
-    if (txtDocs.length < 2) { setMsg("至少需要两个文本文档才能对比"); return; }
-    SN.openModal({
-      title: "双文档对比",
-      width: "900px",
-      height: "70vh",
-      buttons: [{
-        label: "开始对比", primary: true, action: () => {
-          const a = SN.docById($("#cmpA").value);
-          const b2 = SN.docById($("#cmpB").value);
-          SN.closeModal();
-          renderCompare(a, b2);
-        }
-      }, { label: "关闭", action: () => { } }],
-      onOpen(b) {
-        const mkSel = (id) => {
-          const s = el("select", { id, style: "flex:1" });
-          txtDocs.forEach(d => s.appendChild(el("option", { value: d.id, text: d.name })));
-          return s;
-        };
-        b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "左文档" }), mkSel("cmpA")]));
-        b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "右文档" }), mkSel("cmpB")]));
-        b.appendChild(el("div", { class: "hint", text: "按行 LCS 对比。目录/二进制/Hex 范围对比需要后端文件系统支持，纯前端页不提供。" }));
-      }
-    });
-  };
-  function renderCompare(a, b) {
-    SN.$("#bottomDock").classList.remove("hidden");
-    const view = SN.$("#resultView");
-    view.textContent = "";
-    const ops = SN.diffLines(a.content, b.content);
-    const sides = SN.diffBuildSides(ops);
-    const wrap = el("div", { class: "cmp-pane" });
-    const left = el("div", { class: "cmp-side" });
-    const right = el("div", { class: "cmp-side" });
-    left.appendChild(el("div", { class: "cmp-title", text: a.name + "（左） 删除行=红" }));
-    right.appendChild(el("div", { class: "cmp-title", text: b.name + "（右） 新增行=绿" }));
-    const lbody = el("div", { style: "flex:1;overflow:auto" });
-    const rbody = el("div", { style: "flex:1;overflow:auto" });
-    left.appendChild(lbody); right.appendChild(rbody);
-    const fragL = document.createDocumentFragment(), fragR = document.createDocumentFragment();
-    for (const l of sides.left) fragL.appendChild(el("div", { class: "cmp-line " + l.cls, text: l.text }));
-    for (const r of sides.right) fragR.appendChild(el("div", { class: "cmp-line " + r.cls, text: r.text }));
-    lbody.appendChild(fragL); rbody.appendChild(fragR);
-    wrap.appendChild(left); wrap.appendChild(right);
-    view.appendChild(wrap);
-    const total = ops.filter(o => o.type !== "eq").length;
-    setMsg("对比完成：" + sides.left.length + "/" + sides.right.length + " 行，差异行 " + total);
-    // 同步滚动（简化）
-    lbody.addEventListener("scroll", () => { rbody.scrollTop = lbody.scrollTop; });
   }
 
   // ================= 启动 =================

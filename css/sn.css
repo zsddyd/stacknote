@@ -204,13 +204,6 @@ label{user-select:none}
 .md-preview code{font-family:ui-monospace,Consolas,Menlo,monospace}
 .md-preview table{border-collapse:collapse}
 .md-preview td,.md-preview th{border:1px solid var(--border);padding:2px 8px}
-.cmp-pane{display:flex;gap:0;flex:1;min-height:0}
-.cmp-side{flex:1;display:flex;flex-direction:column;min-width:0;border:1px solid var(--border)}
-.cmp-side .cmp-title{padding:3px 6px;background:var(--panel);font-weight:bold;border-bottom:1px solid var(--border)}
-.cmp-line{white-space:pre;font-family:ui-monospace,monospace;font-size:12.5px;padding:0 4px}
-.cmp-line.del{background:#fdd}
-.cmp-line.add{background:#dfd}
-.cmp-line.eq{color:var(--text-weak)}
 .hint{color:var(--text-weak);font-size:12px;margin:2px 0}
 .about-head{display:flex;align-items:baseline;gap:10px}
 .about-name{font-size:16px;font-weight:bold;color:var(--text)}
