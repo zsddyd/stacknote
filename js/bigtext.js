@@ -8,6 +8,7 @@
   const MAX_INDEX_LINES = 3 * 1000 * 1000; // 行数索引上限
   const ROW_SLICE_CAP = 1024 * 1024;       // 单行解码上限（超长行截断展示）
   const CHUNK = 4 * 1024 * 1024;           // 建索引分块大小
+  const HL_WORD = "#B3E5FC";                // 双击单词高亮（与普通文档 wordHighlight 同色）
 
   const codec = (doc) => {
     const c = SN.codeById(doc.enc);
@@ -221,6 +222,7 @@
     let lc = 1;
     let raf = null;
     let lastTop = -1;
+    let hlKw = "";                          // 双击选中的单词（可视行内高亮）
     const langHint = SN.langById(doc.lang);
     const lineTxt = makeLineText(doc);
 
@@ -255,6 +257,30 @@
         freeRows.push(ent);
       }
     }
+    // 渲染单行内容；有高亮词时把匹配片段包成 mark（整词匹配，避开相邻字母/数字/下划线）
+    function renderLine(code, txt) {
+      if (!hlKw) { code.textContent = txt; return; }
+      code.textContent = "";
+      const esc = hlKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let re;
+      try { re = new RegExp(esc, "g"); } catch (e) { code.textContent = txt; return; }
+      const wc = /[A-Za-z0-9_$]/;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      while ((m = re.exec(txt))) {
+        const s = m.index, e = s + m[0].length;
+        if ((s > 0 && wc.test(txt[s - 1])) || (e < txt.length && wc.test(txt[e]))) { re.lastIndex = e; continue; }
+        if (s > last) frag.appendChild(document.createTextNode(txt.slice(last, s)));
+        const mk = document.createElement("mark");
+        mk.textContent = m[0];
+        mk.style.cssText = "background:" + HL_WORD + ";color:inherit";
+        frag.appendChild(mk);
+        last = e;
+        re.lastIndex = e;
+      }
+      if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+      code.appendChild(frag);
+    }
     function paintRows(from, to) {
       for (const key of Array.from(rowMap.keys())) {
         if (key < from || key > to) {
@@ -276,7 +302,7 @@
           ent.row._i = i;
           ent.row.style.top = (i * ROW_H) + "px";
           ent.no.textContent = doc.bigChunkMode ? (i * (doc.bigChunkSize / 1024)) + "K" : String(i + 1);
-          ent.code.textContent = lineTxt(i);
+          renderLine(ent.code, lineTxt(i));
         }
       }
     }
@@ -299,6 +325,24 @@
       lastTop = -1;
       paint();
     }
+    function refreshRows() {
+      for (const [key, ent] of rowMap) renderLine(ent.code, lineTxt(key));
+    }
+    viewport.addEventListener("dblclick", () => {
+      // 等浏览器原生双击选中完成后读取；行为与普通文档“双击单词高亮”一致
+      setTimeout(() => {
+        const s = SN.app && SN.app.settings;
+        if (s && s.wordDblHighlight === false) return;
+        const sel = (window.getSelection ? window.getSelection().toString() : "").trim();
+        if (!sel || sel.length > 256) {
+          if (hlKw) { hlKw = ""; refreshRows(); }
+          return;
+        }
+        hlKw = sel;
+        refreshRows();
+        setBigStatus("高亮 “" + sel + "”：可视行内匹配项已标出，滚动查看（双击空白处取消）");
+      }, 0);
+    });
     doc._bigJump = gotoLine;
     doc.bigFind = () => doFind();
     async function doFind() {
