@@ -222,7 +222,9 @@
     let lc = 1;
     let raf = null;
     let lastTop = -1;
-    let hlKw = "";                          // 双击选中的单词（可视行内高亮）
+    let hlKw = "";                          // 双击选中的单词（临时高亮）
+    doc.bigMarks = doc.bigMarks || [];      // 持久标记（查找→标记颜色），[{keyword,color}]
+    let bigSel = "";                        // 本视图内最近一次非空选中文本（点击菜单时不丢失）
     const langHint = SN.langById(doc.lang);
     const lineTxt = makeLineText(doc);
 
@@ -257,26 +259,49 @@
         freeRows.push(ent);
       }
     }
-    // 渲染单行内容；有高亮词时把匹配片段包成 mark（整词匹配，避开相邻字母/数字/下划线）
-    function renderLine(code, txt) {
-      if (!hlKw) { code.textContent = txt; return; }
-      code.textContent = "";
-      const esc = hlKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // 区间叠加：新加入的 [s,e) 颜色在重叠处覆盖旧颜色，输出仍互不重叠
+    function overlaySegs(segs, s, e, color) {
+      const out = [];
+      for (const g of segs) {
+        if (e <= g.s || s >= g.e) { out.push(g); continue; }
+        if (g.s < s) out.push({ s: g.s, e: s, color: g.color });
+        if (e < g.e) out.push({ s: e, e: g.e, color: g.color });
+      }
+      out.push({ s, e, color });
+      return out.sort((a, b) => a.s - b.s);
+    }
+    // 收集关键字在单行内的匹配区间；whole 时要求整词（避开相邻字母/数字/下划线）
+    function addSegs(segs, txt, kw, color, whole) {
+      if (!kw || txt.length < kw.length) return segs;
+      const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       let re;
-      try { re = new RegExp(esc, "g"); } catch (e) { code.textContent = txt; return; }
+      try { re = new RegExp(esc, whole ? "g" : "gi"); } catch (e) { return segs; }
       const wc = /[A-Za-z0-9_$]/;
-      const frag = document.createDocumentFragment();
-      let last = 0, m;
+      let m;
       while ((m = re.exec(txt))) {
         const s = m.index, e = s + m[0].length;
-        if ((s > 0 && wc.test(txt[s - 1])) || (e < txt.length && wc.test(txt[e]))) { re.lastIndex = e; continue; }
-        if (s > last) frag.appendChild(document.createTextNode(txt.slice(last, s)));
+        if (whole && ((s > 0 && wc.test(txt[s - 1])) || (e < txt.length && wc.test(txt[e])))) { re.lastIndex = e; continue; }
+        segs = overlaySegs(segs, s, e, color);
+        re.lastIndex = Math.max(re.lastIndex, m.index + 1);
+      }
+      return segs;
+    }
+    // 渲染单行内容：临时单词高亮 + 各颜色持久标记，匹配片段包成 mark
+    function renderLine(code, txt) {
+      let segs = [];
+      if (hlKw) segs = addSegs(segs, txt, hlKw, HL_WORD, true);
+      for (const rec of doc.bigMarks) segs = addSegs(segs, txt, rec.keyword, rec.color, false);
+      if (!segs.length) { code.textContent = txt; return; }
+      code.textContent = "";
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      for (const g of segs) {
+        if (g.s > last) frag.appendChild(document.createTextNode(txt.slice(last, g.s)));
         const mk = document.createElement("mark");
-        mk.textContent = m[0];
-        mk.style.cssText = "background:" + HL_WORD + ";color:inherit";
+        mk.textContent = txt.slice(g.s, g.e);
+        mk.style.cssText = "background:" + g.color + ";color:inherit";
         frag.appendChild(mk);
-        last = e;
-        re.lastIndex = e;
+        last = g.e;
       }
       if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
       code.appendChild(frag);
@@ -328,6 +353,31 @@
     function refreshRows() {
       for (const [key, ent] of rowMap) renderLine(ent.code, lineTxt(key));
     }
+    function insidePage(n) {
+      while (n) { if (n === page) return true; n = n.parentNode; }
+      return false;
+    }
+    // 记录本视图内的选区：菜单点击发生在页面外，不会清掉 bigSel（等效于 textarea 失焦保留选区）
+    document.addEventListener("selectionchange", () => {
+      const sel = window.getSelection && window.getSelection();
+      if (!sel || !sel.anchorNode || !insidePage(sel.anchorNode)) return;
+      bigSel = sel.isCollapsed ? "" : (sel.toString() || "").trim();
+      if (bigSel.length > 4096) bigSel = "";
+    });
+    doc.bigSelected = () => bigSel;
+    doc.bigAddMark = function (kw, color) {
+      doc.bigMarks = doc.bigMarks || [];
+      const idx = doc.bigMarks.findIndex(r => r.keyword === kw && r.color === color);
+      const rec = { keyword: kw, color };
+      if (idx >= 0) doc.bigMarks[idx] = rec; else doc.bigMarks.push(rec);
+      hlKw = "";
+      refreshRows();
+    };
+    doc.bigClearMarks = function () {
+      doc.bigMarks = [];
+      hlKw = "";
+      refreshRows();
+    };
     viewport.addEventListener("dblclick", () => {
       // 等浏览器原生双击选中完成后读取；行为与普通文档“双击单词高亮”一致
       setTimeout(() => {

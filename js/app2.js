@@ -356,8 +356,19 @@
 
   // 用“当前选中文本”作为关键字做标记（无选中时退回上次查找关键字）
   cmd.markSelected = function () {
-    const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!d || !ed || d.kind !== "text") { setMsg("没有活动文本文档"); return false; }
+    const d = SN.activeDoc();
+    if (!d) { setMsg("没有活动文本文档"); return false; }
+    if (d.kind === "big") {
+      const kw = (d.bigSelected && d.bigSelected()) || "";
+      if (!kw) { setMsg("请先在大文件视图中选中要高亮的文本"); return false; }
+      if (/\r|\n/.test(kw) || kw.length > 4096) { setMsg("大文件标记仅支持单行内且较短的文本"); return false; }
+      if (!d.bigAddMark) { setMsg("大文件标记暂不可用"); return false; }
+      d.bigAddMark(kw, app.curMarkColor);
+      setMsg("已用颜色高亮 “" + kw + "”：滚动查看（“清除全部标记”可移除）");
+      return true;
+    }
+    const ed = SN.activeEditor();
+    if (!ed || d.kind !== "text") { setMsg("没有活动文本文档"); return false; }
     let kw = ed.hasSelection() ? ed.selectedText().trim() : "";
     if (!kw && app.findOpt.keyword) kw = app.findOpt.keyword;
     if (!kw) { setMsg("请先双击/选中要高亮的文本，或先输入查找关键字"); return false; }
@@ -382,7 +393,10 @@
     return true;
   };
   cmd.clearMarksAll = function () {
-    app.docs.forEach(d => { if (d.editor) d.editor.clearPersistentMarks(); });
+    app.docs.forEach(d => {
+      if (d.editor) d.editor.clearPersistentMarks();
+      else if (d.kind === "big" && d.bigClearMarks) d.bigClearMarks();
+    });
     setMsg("已清除全部标记");
   };
   cmd.wordHighlight = function (word) {

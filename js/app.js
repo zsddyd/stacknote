@@ -355,10 +355,15 @@
       stay: true, rebuild: true,
       action: () => {
         app.curMarkColor = c; app.settings.markColorIdx = i; saveSettings();
-        // 若当前有选中文本，则直接用新颜色把选中词全部高亮（连续换色即重新高亮）
         const ed = SN.activeEditor();
         if (ed && ed.hasSelection() && ed.selectedText().trim() && SN.cmd.markSelected) {
           SN.cmd.markSelected();
+        } else {
+          // 大文件视图没有 Editor：用最近在视图内选中的文本标记（连续换色即重新高亮）
+          const d = SN.activeDoc();
+          if (d && d.kind === "big" && d.bigSelected && d.bigSelected() && SN.cmd.markSelected) {
+            SN.cmd.markSelected();
+          }
         }
       }
     }));
