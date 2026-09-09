@@ -983,12 +983,32 @@
   dlg.about = function () {
     SN.openModal({
       title: "关于 StackNote",
-      width: "560px",
+      width: "580px",
       buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
-        b.appendChild(el("div", { class: "hint", text: "StackNote —— 零依赖、零构建的纯前端多标签文本编辑器。" }));
-        b.appendChild(el("div", { class: "hint", text: "功能：多标签文本/Hex 只读/大文件只读、编码识别与转码(写)、查找替换/正则/标记/书签、行操作/大小写/空白、18 套编辑器主题 + 明暗皮肤、会话恢复、MD5/SHA、XML/JSON 格式化、列块编辑、双文档对比、Markdown 预览、插件(JS 脚本)。" }));
-        b.appendChild(el("div", { class: "hint", text: "浏览器限制：无法监控本地文件变化、目录遍历对比、GBK 写出、系统右键/管理员提权；文件需通过文件选择器/拖拽打开（支持 File System Access 浏览器可直接保存回原文件）。" }));
+        const ver = window.SN_VERSION || "dev";
+        const head = el("div", { class: "about-head" });
+        head.appendChild(el("span", { class: "about-name", text: "StackNote" }));
+        head.appendChild(el("span", { class: "about-ver", text: "版本：" + ver }));
+        b.appendChild(head);
+        b.appendChild(el("div", { class: "about-desc", text: "零依赖、零构建的纯前端多标签文本编辑器。" }));
+
+        b.appendChild(el("div", { class: "about-sec", text: "功能特性" }));
+        const feats = [
+          "多标签文本 / Hex 只读 / 大文件只读",
+          "编码识别与转码(写)",
+          "查找替换 / 正则 / 标记 / 书签",
+          "行操作 / 大小写 / 空白",
+          "18 套编辑器主题 + 明暗皮肤",
+          "会话恢复",
+          "MD5/SHA、XML/JSON 格式化",
+          "列块编辑、双文档对比、Markdown 预览、插件（JS 脚本）"
+        ];
+        feats.forEach(t => b.appendChild(el("div", { class: "about-li", text: t })));
+
+        b.appendChild(el("div", { class: "about-sec", text: "浏览器限制" }));
+        b.appendChild(el("div", { class: "about-li", text: "无法监控本地文件变化、目录遍历对比、GBK 写出、系统右键/管理员提权。" }));
+        b.appendChild(el("div", { class: "about-li", text: "文件需通过文件选择器/拖拽打开（支持 File System Access 浏览器可直接保存回原文件）。" }));
       }
     });
   };
