@@ -1,0 +1,10 @@
+{
+  "name": "StackNote",
+  "short_name": "sn-web",
+  "description": "零依赖、零构建的纯前端多标签文本编辑器",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f0f0f0",
+  "theme_color": "#FAAA3C",
+  "lang": "zh-CN"
+}

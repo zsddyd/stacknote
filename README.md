@@ -1,0 +1,128 @@
+# StackNote（纯前端多标签文本编辑器）
+
+用 **零依赖、零构建** 的纯前端静态页面实现的多标签文本编辑器，支持大文本 / Hex 只读、编码识别与转码、查找替换、语法高亮、双文档对比、Markdown 预览等功能，可直接部署到 Cloudflare Pages / 阿里云 OSS / Netlify / GitHub Pages 等静态托管。
+
+## 快速体验
+
+直接双击 `index.html` 即可在浏览器打开（建议用 Chrome/Edge/Firefox）。
+本地起服务（可选）：
+
+```bash
+cd stacknote
+python3 -m http.server 8080
+# 打开 http://localhost:8080
+```
+
+可选自检（Node ≥ 16，无浏览器依赖，用 DOM 桩做启动冒烟）：
+
+```bash
+node smoke.js
+```
+
+## 实现的功能
+
+### 文档与文件
+- 多标签新建/打开/保存/另存为/重命名/关闭（标签右键菜单）
+- 拖拽文件、批量打开；最近文件列表（支持 File System Access 句柄持久化重开）
+- 会话恢复：标签、正文、脏标记、编码写入 IndexedDB，刷新后自动还原
+- 自动保存草稿到浏览器（可开关）
+- 文件列表停靠窗、查找结果停靠窗、工具栏显隐
+
+### 编辑器
+- 自带轻量语法高亮引擎（约 30 种语言，含 C/C++/Java/Python/Go/Rust/JS/TS/HTML/CSS/JSON/SQL/Shell 等），行号+书签侧栏，整行高亮，多色指示器（查找/标记）
+- 撤销/重做（自管栈，Ctrl+Z/Y）、Tab 插入/行首退格、跳转行
+- 大文本只读模式（BigTextRO，虚拟滚动：只渲染可视行，默认 ≥6MB 自动启用，避免大文件卡顿/OOM）；Hex 只读视图（分页/地址跳转）
+- 自动换行、显示空白/行尾、缩放
+
+### 编码与换行
+- BOM/无 BOM 编码探测（UTF-8/UTF-16LE/BE/GBK/Big5/Shift-JIS…）
+- 以编码重载、转换为编码（写出支持 UTF-8/BOM/UTF-16；GBK 等只读解码）
+- 行尾 CRLF/LF/CR 状态栏切换与整文转换
+
+### 查找 / 替换 / 标记 / 书签
+- 查找/替换面板（大小写/全词/正则），F3/F4、Ctrl+F/H
+- 全部标记（8 色）、词高亮（双击单词）、清除标记
+- 在打开的文档中查找 → 结果停靠窗（点击跳转、复制结果）
+- 书签（F2 / Shift+F2 / Ctrl+F2）
+
+### 文本操作
+- 大小写 7 种、行首尾空白清理、TAB↔空格
+- 行操作：复制/删除重复(连续或全部)/拆分/上下移/删空行/行反序/6 种排序
+- 列块编辑对话框（文本填充 / 数字序列 / 前缀，支持 2/8/10/16 进制）
+
+### 编码/语言/主题
+- 语言菜单（按首字母分组 + XML/YAML/TXT/用户自定义语言）
+- 自定义语言（名称/后缀/关键字，持久化）
+- 18 套编辑器主题 + 界面浅/暗皮肤
+
+### 工具 / 其它
+- JSON/XML 格式化、MD5/SHA-1/256/512 计算（文件或选中文本）
+- 批量转换打开文档的编码标记
+- 双文档行级 LCS 对比（红删绿增左右栏）
+- 插件系统：内置 Base64/URL/UUID/时间戳等脚本插件，可添加自定义 JS 变换插件
+- 快捷键一览、选项对话框、关于
+
+## 因浏览器/静态托管限制未实现
+
+- 本地文件**监控/外部改动提示**与 **tail -f**（需后端事件）
+- **目录遍历查找/目录对比/二进制对比**（需后端文件系统能力）
+- **GBK/Big5/Shift-JIS 写出**（浏览器无对应编码器；读取支持）
+- 系统右键菜单、管理员提权、资源管理器/终端打开、批量重命名磁盘文件
+- 多窗口（多标签可用；跨浏览器实例 IPC 不做）
+- 括号匹配/代码折叠/自动补全等高级编辑特性（当前采用简化方案）
+
+## 技术要点
+
+- 单页面 + 原生 JS（IIFE 分文件），无 npm/打包步骤；打开即用、离线可用
+- 编辑区 = `<textarea>`（透明文字）+ 高亮 `<pre>` 覆盖层 + 行号侧栏（对齐/滚动同步）
+- 持久化 = IndexedDB（配置/会话/文件句柄/用户插件）+ localStorage 兜底
+- 会话持久化对 >4MB 的正文自动跳过（大文档重启后需重新打开），避免写库卡顿
+- 文件写入优先走 File System Access API（Chrome/Edge），否则回退为“下载”
+
+## 文件结构
+
+```text
+index.html             入口
+manifest.webmanifest   PWA manifest
+css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
+js/util.js             基础工具/事件总线
+js/themes.js           18 套编辑器主题 + 明暗皮肤
+js/langdefs.js         语言表（关键词/后缀/注释风格）
+js/highlight.js        轻量语法着色 + 标记渲染
+js/encoding.js         编码探测/解码/编码写出
+js/hash.js             MD5 + WebCrypto(SHA-1/256/512)
+js/storage.js          IndexedDB 封装（设置/会话/用户插件）
+js/editor.js           编辑器控件（覆盖层高亮、行号、撤销、书签、缩放）
+js/textops.js          文本变换纯函数
+js/diff.js             行级 LCS 对比
+js/app.js              应用框架：菜单/工具栏/标签/文档/状态栏/对话框骨架
+js/app2.js             业务实现：查找/编辑操作/Hex/工具/插件/选项/对比/启动
+```
+
+## 部署到静态托管
+
+### Cloudflare Pages
+1. 在 Cloudflare Dashboard → Workers & Pages → 创建 → Pages。
+2. “直接上传”本目录内容（或连接 Git 仓库，构建命令留空，输出目录留空/`/`）。
+3. 部署完成后即可访问，无需任何服务器逻辑。
+
+### 阿里云 OSS / 其它对象存储
+1. 在 OSS 控制台新建 Bucket，将目录内文件全部上传。
+2. Bucket 设置“静态网站托管”，默认首页填 `index.html`。
+3. 若绑定自定义域名，请配置对应 CDN/HTTPS。
+
+### Netlify / Vercel / GitHub Pages
+- Netlify：拖拽文件夹上传即可（无构建命令）。
+- Vercel：项目类型选 “Other / Static”，输出目录 `/`。
+- GitHub Pages：把本目录推送到仓库根即可。
+
+> 提示：所有资源均为相对路径且无外部 CDN 依赖，任意静态空间都可直接使用。
+
+## License / 许可证
+
+- StackNote 以 **GNU General Public License v3.0**（SPDX: `GPL-3.0-only`）发布，完整许可文本见 [LICENSE](LICENSE)。
+- Copyright (C) 2026 zsddyd。
+
+### 出处与致谢
+
+StackNote 是桌面文本编辑器 **notepad--**（[gitee.com/cxasm/notepad--](https://gitee.com/cxasm/notepad--) / [github.com/cxasm/notepad--](https://github.com/cxasm/notepad--) ，GPL-3.0）的独立前端重实现：仅参考其交互与功能布局进行纯前端开发，不含原项目的 C++/Qt 代码。原项目以 GPL-3.0 发布，依据其许可要求，本项目在此声明出处并沿用 GPL-3.0 许可发布。

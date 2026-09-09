@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>StackNote</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/sn.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23FAAA3C'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle' fill='white' font-family='monospace'%3ES%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+  <!-- 顶栏：菜单 + 工具栏 -->
+  <header id="topbar">
+    <nav id="menubar"></nav>
+    <div id="toolbar"></div>
+  </header>
+
+  <!-- 工作区 -->
+  <div id="workbench">
+    <!-- 左侧/中央：标签 + 编辑器 -->
+    <div id="editorCol">
+      <div id="tabbar">
+        <div id="tabstrip"></div>
+        <button id="newTabBt" class="iconbt" title="新建文件 (Ctrl+T)">＋</button>
+      </div>
+      <div id="editorZone"></div>
+      <!-- 底部停靠：查找结果 / 对比结果（顶部细条可上下拖动调高度） -->
+      <div id="dockSplit" class="dock-split hidden" title="拖动调整结果栏高度"></div>
+      <div id="bottomDock" class="hidden">
+        <div class="dockhead">
+          <span class="docktitle">结果</span>
+          <span class="docktools">
+            <button class="dockclean" title="清除">×</button>
+          </span>
+        </div>
+        <div id="resultView"></div>
+      </div>
+    </div>
+
+    <!-- 右侧停靠：文件列表 -->
+    <aside id="fileDock" class="hidden">
+      <div class="dockhead">
+        <span class="docktitle">文件列表</span>
+        <span class="docktools"><button class="dockclean" title="关闭">×</button></span>
+      </div>
+      <ul id="fileList"></ul>
+    </aside>
+  </div>
+
+  <!-- 状态栏 -->
+  <footer id="statusbar">
+    <span id="msgLabel" class="st-msg"></span>
+    <span class="st-right">
+      <span id="zoomLabel" class="st-cell">Zoom 100%</span>
+      <span id="langLabel" class="st-cell">TXT</span>
+      <span id="posLabel" class="st-cell">Ln:1  Col:1</span>
+      <select id="eolSel" class="st-cell" title="行尾格式">
+        <option value="crlf">Windows(CR LF)</option>
+        <option value="lf" selected>Unix(LF)</option>
+        <option value="cr">Mac(CR)</option>
+      </select>
+      <span id="codeLabel" class="st-cell">UTF-8</span>
+    </span>
+  </footer>
+</div>
+
+<!-- 浮层 -->
+<div id="modalHost"></div>
+<div id="ctxmenu" class="hidden"></div>
+<div id="toasts"></div>
+
+<input type="file" id="fileInput" multiple hidden>
+<input type="file" id="dirInput" webkitdirectory hidden>
+
+<script src="js/util.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/langdefs.js"></script>
+<script src="js/highlight.js"></script>
+<script src="js/encoding.js"></script>
+<script src="js/hash.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/bigtext.js"></script>
+<script src="js/textops.js"></script>
+<script src="js/diff.js"></script>
+<script src="js/app.js"></script>
+<script src="js/app2.js"></script>
+</body>
+</html>
