@@ -122,7 +122,7 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
 const files = [
-  "js/util.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
+  "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
   "js/textops.js", "js/app.js", "js/app2.js"
@@ -158,18 +158,27 @@ assert(SN.shortcuts.groups().length >= 4, "按键表按组呈现");
 
 // 按键命中：修饰键必须完全相等
 // （旧实现里 Ctrl+Shift+F 被 Ctrl+F 吞掉、Ctrl+F2 被 F2 吞掉，都是因为没做这一步）
-const keyEv = (o) => Object.assign({ ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, key: "", preventDefault() { } }, o);
+const keyEv = (o) => Object.assign({
+  ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, key: "", defaultPrevented: false,
+  preventDefault() { this.defaultPrevented = true; }
+}, o);
 const hitOf = (o) => { const it = SN.shortcuts.findEvent(keyEv(o)); return it ? it.id : null; };
 
 // DOM 桩遍历工具（桩只在 children 上建树，textContent 不会自动聚合子节点）
 const walkNodes = (n, fn) => { (n.children || []).forEach(c => { fn(c); walkNodes(c, fn); }); };
-const byClass = (root, cls) => { const out = []; walkNodes(root, n => { if (n.className === cls) out.push(n); }); return out; };
+// 按 class token 匹配（等价于 classList.contains），这样 "iconbt disabled" 也能被 "iconbt" 找到
+const byClass = (root, cls) => {
+  const out = [];
+  walkNodes(root, n => { if (String(n.className).split(/\s+/).indexOf(cls) >= 0) out.push(n); });
+  return out;
+};
 const byText = (root, text) => { let hit = null; walkNodes(root, n => { if (!hit && n.textContent === text) hit = n; }); return hit; };
 const clickableByText = (root, text) => {
   let hit = null;
   walkNodes(root, n => { if (!hit && n.textContent === text && n.handlers && n.handlers.click) hit = n; });
   return hit;
 };
+const byIdIn = (root, id) => { let hit = null; walkNodes(root, n => { if (!hit && n.id === id) hit = n; }); return hit; };
 assert(hitOf({ ctrlKey: true, key: "f" }) === "find.open", "Ctrl+F → 查找");
 assert(hitOf({ ctrlKey: true, shiftKey: true, key: "F" }) === "find.openDocs", "Ctrl+Shift+F → 跨文档查找");
 assert(hitOf({ ctrlKey: true, shiftKey: true, key: "f" }) === "find.openDocs", "Ctrl+Shift+F 大小写无关");
@@ -184,15 +193,15 @@ assert(hitOf({ ctrlKey: true, key: "z" }) === null, "Ctrl+Z 由文本域处理�
 assert(hitOf({ ctrlKey: true, key: "x" }) === null, "Ctrl+X 走浏览器原生");
 assert(hitOf({ ctrlKey: true, key: "d" }) === "line.dup", "Ctrl+D → 复制当前行");
 
-// 分发链路真的执行（用桩替换 dlg.find 观察收到的 mode）
+// 分发链路真的执行（用桩替换 dlg.find 观察收到的参数：两个入口统一到同一个对话框，只差默认作用域）
 {
   const saved = SN.dlg.find;
   const seen = [];
-  SN.dlg.find = (mode) => seen.push(mode);
+  SN.dlg.find = (o) => seen.push(o && o.scope);
   SN.shortcuts.dispatch(keyEv({ ctrlKey: true, shiftKey: true, key: "F" }));
   SN.shortcuts.dispatch(keyEv({ ctrlKey: true, key: "f" }));
   SN.dlg.find = saved;
-  assert(seen.join(",") === "opendocs,find", "dispatch 分别执行跨文档查找与查找");
+  assert(seen.join(",") === "docs,doc", "Ctrl+Shift+F 默认查所有打开文件、Ctrl+F 默认查当前文件，实际=" + seen.join(","));
 }
 
 // 改键接口（后续「自���义快捷键」的落点）：显示与分发同步跟随
@@ -277,7 +286,11 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     const known = SN.shortcuts.items().map(it => it.accel);
     assert(accelTexts.length >= 15, "菜单渲染出快捷键提示，数量 = " + accelTexts.length);
     assert(accelTexts.every(t => known.indexOf(t) >= 0), "菜单提示均来自快捷键表：" + accelTexts.join(","));
-    assert(accelTexts.indexOf("Ctrl+Shift+F") >= 0, "菜单提示含 Ctrl+Shift+F");
+    // 两个查找入口已统一：菜单只剩「查找…」，Ctrl+Shift+F 仍作为快捷方式保留在快捷键表里
+    assert(accelTexts.indexOf("Ctrl+F") >= 0, "菜单提示含 Ctrl+F");
+    assert(accelTexts.indexOf("Ctrl+Shift+F") < 0, "菜单已不再单列 Ctrl+Shift+F（统一进「查找…」）");
+    assert(SN.shortcuts.accelOf("find.openDocs") === "Ctrl+Shift+F", "Ctrl+Shift+F 仍保留在快捷键表（默认查所有打开文件）");
+    assert(byText(documentStub.querySelector("#menubar"), "视图能力表…"), "「关于」菜单下有视图能力表入口");
   }
 
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
@@ -286,13 +299,13 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     assert(handlers.length === 1, "已注册全局 keydown 监听，数量 = " + handlers.length);
     const saved = SN.dlg.find;
     const seen = [];
-    SN.dlg.find = (mode) => seen.push(mode);
+    SN.dlg.find = (o) => seen.push(o && o.scope);
     const fire = (o) => handlers.forEach(f => f(Object.assign({ target: { closest: () => null } }, keyEv(o))));
     fire({ ctrlKey: true, shiftKey: true, key: "F" });
     fire({ ctrlKey: true, key: "f" });
     fire({ ctrlKey: true, altKey: true, key: "f" });
     SN.dlg.find = saved;
-    assert(seen.join(",") === "opendocs,find", "Ctrl+Shift+F / Ctrl+F 经真实监听器分发到对应 mode，多余修饰键不触发");
+    assert(seen.join(",") === "docs,doc", "Ctrl+Shift+F / Ctrl+F 经真实监听器分发到同一对话框的不同默认作用域，多余修饰键不触发");
   }
 
   // 快捷键一览对话框同样从表里取数（改键后此处自动跟随，不再是另一份硬编码清单）
@@ -302,7 +315,7 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
     const all = texts.join("|");
     assert(all.indexOf("快捷键一览") >= 0, "一览对话框已打开");
-    assert(all.indexOf("Ctrl+Shift+F") >= 0 && all.indexOf("在打开的文档中查找…") >= 0, "一览对话框含跨文档查找条目");
+    assert(all.indexOf("Ctrl+Shift+F") >= 0 && all.indexOf("查找…（默认查所有打开文件）") >= 0, "一览对话框含「默认查所有打开文件」条目");
     assert(all.indexOf("Alt+X") >= 0 && all.indexOf("Ctrl+D") >= 0, "一览对话框含列块编辑/复制当前行条目");
     SN.closeModal();
   }
@@ -345,11 +358,12 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     assert(SN.activeEditor() === null, "大文件没有编辑器（复现前提）");
 
     SN.app.findOpt.keyword = "needle";
-    SN.dlg.find("opendocs");
+    SN.dlg.find({ scope: "docs" });
     const modal = documentStub.querySelector("#modalHost");
-    assert(byText(modal, "在打开的文档中查找"), "当前是大文件时仍打开「在打开的文档中查找」");
-    const runAll = clickableByText(modal, "在所有文档查找");
-    assert(runAll, "对话框提供「在所有文档查找」按钮");
+    assert(byText(modal, "查找"), "当前是大文件时同样打开统一的「查找」对话框");
+    assert(clickableByText(modal, "当前文件中查找"), "对话框提供「当前文件中查找」按钮");
+    const runAll = clickableByText(modal, "查找所有打开文件");
+    assert(runAll, "对话框提供「查找所有打开文件」按钮");
     assert(!clickableByText(modal, "查找下一个"), "无编辑器时不提供逐条跳转按钮");
     // 桩里 el() 建的输入框不在 registry 上，这里给桩节点补上关键字
     documentStub.querySelector("#findKey").value = "needle";
@@ -396,31 +410,215 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     SN.activateDoc = savedActivate;
     assert(jumped.join(",") === "2", "点击结果跳到大文件第 2 行，实际=" + jumped.join(","));
 
-    // 当前文档查找仍走该大文件自己的分块搜索（Ctrl+F 行为不变）
-    const b1Find = b1.bigFind;
-    let calledFind = 0;
-    b1.bigFind = () => { calledFind++; };
+    // 统一入口下「当前文件中查找」同样走该大文件的分块检索，并自动定位到首处命中
     SN.app.activeId = b1.id;
-    SN.dlg.find("find");
-    assert(calledFind === 1, "Ctrl+F 在大文件上仍走本文件分块搜索");
-    b1.bigFind = b1Find;
+    SN.app.findOpt.keyword = "needle";
+    SN.dlg.find({ scope: "doc" });
+    const docModal = documentStub.querySelector("#modalHost");
+    const hereBtn = clickableByText(docModal, "当前文件中查找");
+    assert(hereBtn, "「查找」对话框提供当前文件作用域");
+    documentStub.querySelector("#findKey").value = "needle";
+    const jumpedHere = [];
+    b1._bigJump = (line) => jumpedHere.push(line);
+    await hereBtn.handlers.click[0]();
+    SN.closeModal();
+    const hereSecs = byClass(documentStub.querySelector("#resultView"), "res-sec").map(n => n.textContent);
+    assert(hereSecs.length === 1 && hereSecs[0].indexOf("a.log") >= 0, "当前文件作用域只列出该大文件，实际=" + hereSecs.join(" / "));
+    assert(byClass(documentStub.querySelector("#resultView"), "res-row").length === 2, "当前文件作用域命中该文件 2 处");
+    assert(jumpedHere.join(",") === "1", "无编辑器视图自动定位到首处命中行，实际=" + jumpedHere.join(","));
 
-    // 大文件单文件搜索（bigtext 分块检索 → showBigResults）也必须落到同一套可折叠分组
+    // 统一查找对话框：两个作用域按钮 + 主按钮随入口切换 + 回车提交 + 视图能力提示
+    {
+      SN.app.activeId = b1.id;
+      // 桩里 el() 建的输入框不在 registry 上，而代码用 $("#findKey") 取它；
+      // 清掉上一轮对话框残留的监听，避免调用到旧闭包
+      documentStub.querySelector("#findKey").handlers = {};
+      SN.dlg.find({ scope: "docs" });
+      const um = documentStub.querySelector("#modalHost");
+      const here1 = clickableByText(um, "当前文件中查找");
+      const all1 = clickableByText(um, "查找所有打开文件");
+      assert(here1 && all1, "统一对话框同时提供两个作用域按钮");
+      assert(String(all1.style.background).indexOf("accent") >= 0, "从 Ctrl+Shift+F 进入时「查找所有打开文件」为主按钮");
+      assert(String(here1.style.background).indexOf("accent") < 0, "非默认作用域不带主色");
+      const kwInput = documentStub.querySelector("#findKey");
+      assert(kwInput && kwInput.handlers && kwInput.handlers.keydown, "关键字框支持回车提交");
+      const umTexts = [];
+      walkNodes(um, n => { if (n.textContent) umTexts.push(n.textContent); });
+      assert(umTexts.join("|").indexOf("分块流式检索") >= 0, "大文件下说明检索方式（忽略大小写、不支持正则/全词）");
+      // 回车 = 默认作用域（scope=docs → 所有打开文件）
+      documentStub.querySelector("#findKey").value = "needle";
+      kwInput.handlers.keydown[0]({ key: "Enter", preventDefault() { } });
+      // 跨文档检索对每个大文件都会分块 + 让出主线程，等结果面板出现两组为止
+      for (let i = 0; i < 60 && byClass(documentStub.querySelector("#resultView"), "res-sec").length < 2; i++) {
+        await new Promise(r => setTimeout(r, 5));
+      }
+      const enterSecs = byClass(documentStub.querySelector("#resultView"), "res-sec").map(n => n.textContent);
+      assert(enterSecs.length === 2, "回车按默认作用域查所有打开文件，实际=" + enterSecs.join(" / ") + "｜docs=" + SN.app.docs.map(x => x.name + ":" + x.kind).join(","));
+      SN.closeModal();
+
+      // 从 Ctrl+F 进入时主按钮切换为「当前文件中查找」
+      SN.dlg.find({ scope: "doc" });
+      const um2 = documentStub.querySelector("#modalHost");
+      assert(String(clickableByText(um2, "当前文件中查找").style.background).indexOf("accent") >= 0, "Ctrl+F 进入时「当前文件中查找」为主按钮");
+      SN.closeModal();
+
+      // Hex 视图：当前文件不可查找（按钮禁用 + 原因），跨文档仍可用
+      const hexDoc = { id: "hextest", name: "x.bin", kind: "hex", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new Uint8Array([1, 2, 3]) };
+      SN.app.docs.push(hexDoc);
+      SN.app.activeId = hexDoc.id;
+      SN.dlg.find({ scope: "doc" });
+      const um3 = documentStub.querySelector("#modalHost");
+      assert(!clickableByText(um3, "当前文件中查找"), "Hex 视图下「当前文件中查找」不可点击");
+      let hexHere = null;
+      walkNodes(um3, n => { if (!hexHere && n.textContent === "当前文件中查找") hexHere = n; });
+      assert(hexHere && hexHere.disabled === true && String(hexHere.title).indexOf("Hex 只读视图不支持查找") === 0,
+        "Hex 下禁用并说明原因，实际=" + (hexHere && hexHere.title));
+      assert(clickableByText(um3, "查找所有打开文件"), "跨文档查找在 Hex 视图下仍可用");
+      // 统一入口：Hex 视图下 Ctrl+F 仍能打开对话框（只是当前文件作用域不可用）
+      assert(SN.shortcuts.available("find.open", hexDoc) && SN.shortcuts.available("find.openDocs", hexDoc), "查找对话框在 Hex 视图也可用");
+      assert(!SN.shortcuts.available("find.replace", hexDoc) && !SN.shortcuts.available("find.next", hexDoc), "替换与步进查找在 Hex 视图不可用");
+      const hexTexts = [];
+      walkNodes(um3, n => { if (n.textContent) hexTexts.push(n.textContent); });
+      assert(hexTexts.join("|").indexOf("仍可查找其它打开的文档") >= 0, "Hex 下说明可查其它文档");
+      SN.closeModal();
+      SN.app.docs = SN.app.docs.filter(x => x.id !== hexDoc.id);
+      SN.app.activeId = b1.id;
+      SN.refreshMenus();
+    }
+
+    // ============ 视图能力表：菜单/工具栏/快捷键按能力置灰（js/viewcaps.js） ============
+    {
+      const textDoc = { kind: "text" }, bigDoc = { kind: "big" }, hexDoc = { kind: "hex" };
+      assert(SN.caps.can("save", textDoc) && SN.caps.can("undo", textDoc) && SN.caps.can("view", textDoc), "文本视图能力齐全");
+      assert(!SN.caps.can("save", bigDoc) && !SN.caps.can("edit", bigDoc) && !SN.caps.can("undo", bigDoc), "大文本视图不支持保存/编辑/撤销");
+      assert(SN.caps.can("find", bigDoc) && SN.caps.can("mark", bigDoc) && SN.caps.can("gotoLine", bigDoc) && SN.caps.can("exportBytes", bigDoc), "大文本视图仍支持查找/标记/跳转行/导出");
+      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc) && !SN.caps.can("statusPos", bigDoc), "大文本视图不支持书签/视图开关/选中哈希/行列定位");
+      assert(SN.caps.can("exportBytes", hexDoc) && !SN.caps.can("find", hexDoc), "Hex 视图只支持导出原始字节");
+      assert(SN.caps.reason("save", bigDoc) === "大文本只读视图不支持保存/另存为", "统一原因文案，实际=" + SN.caps.reason("save", bigDoc));
+      assert(SN.caps.reason("save", textDoc) === "", "可用时原因为空");
+
+      SN.app.activeId = b1.id;
+      SN.refreshMenus();
+      const menubarNode = documentStub.querySelector("#menubar");
+      const saveItem = byText(menubarNode, "保存").parent;
+      assert(saveItem.classList.contains("disabled"), "大文件下菜单「保存」置灰");
+      assert(String(saveItem.title).indexOf("大文本只读视图不支持保存") === 0, "置灰项 tooltip 说明原因，实际=" + saveItem.title);
+      assert(!byText(menubarNode, "查找…").parent.classList.contains("disabled"), "大文件下「查找…」仍可用");
+      assert(!byText(menubarNode, "全部标记(Mark All)").parent.classList.contains("disabled"), "大文件下「全部标记」仍可用");
+      const tbBtns = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      const tbSave = tbBtns.filter(b => String(b.title || "").indexOf("保存") === 0)[0];
+      const tbFind = tbBtns.filter(b => String(b.title || "").indexOf("查找") === 0)[0];
+      assert(tbSave && tbSave.className.indexOf("disabled") >= 0, "大文件下工具栏「保存」置灰");
+      assert(tbFind && tbFind.className.indexOf("disabled") < 0, "大文件下工具栏「查找」仍可用");
+      assert(documentStub.querySelector("#posLabel").textContent.indexOf("大文本只读视图不支持行列定位信息") === 0,
+        "状态栏不再显示陈旧行列，实际=" + documentStub.querySelector("#posLabel").textContent);
+      assert(documentStub.querySelector("#eolSel").disabled === true, "行尾选择器在只读视图禁用");
+
+      // 快捷键：能力不足时不执行、不静默，且仍 preventDefault（挡住浏览器默认行为）
+      const toasts = [];
+      const savedToast = SN.toast, savedSave = SN.cmd.save;
+      let saved = 0;
+      SN.toast = (m) => toasts.push(m);
+      SN.cmd.save = () => { saved++; };
+      const evSave = keyEv({ ctrlKey: true, key: "s" });
+      const blocked = SN.shortcuts.dispatch(evSave);
+      assert(blocked && blocked.blocked === true && saved === 0, "大文件下 Ctrl+S 不执行保存");
+      assert(evSave.defaultPrevented === true, "被拦时仍 preventDefault（否则会弹出浏览器另存为）");
+      assert(toasts.length === 1 && toasts[0].indexOf("大文本只读视图不支持保存") === 0, "给出统一提示，实际=" + toasts.join("|"));
+      // F3/F4 是「步进查找」，需要光标定位：大文件只读视图不可用；而查找本身（Ctrl+F）仍可用
+      assert(SN.shortcuts.available("find.open", b1) && !SN.shortcuts.available("find.next", b1), "大文件可用查找、不可步进查找");
+      SN.shortcuts.dispatch(keyEv({ key: "F3" }));
+      assert(toasts.length === 2 && toasts[1].indexOf("查找下一个/上一个") >= 0, "F3 在大文件上给出不可用说明，实际=" + toasts.join("|"));
+      const savedFind2 = SN.dlg.find;
+      SN.dlg.find = () => { };
+      SN.shortcuts.dispatch(keyEv({ ctrlKey: true, key: "f" }));
+      assert(toasts.length === 2, "可用的 Ctrl+F 不产生提示");
+      SN.dlg.find = savedFind2;
+      assert(SN.shortcuts.available("find.open", b1) && !SN.shortcuts.available("file.save", b1), "available() 与能力表一致");
+      SN.app.activeId = d0.id;
+      assert(SN.shortcuts.dispatch(keyEv({ ctrlKey: true, key: "s" })) && saved === 1, "文本视图下 Ctrl+S 正常执行");
+      SN.cmd.save = savedSave;
+      SN.toast = savedToast;
+
+      // 哈希面板：只读视图下「计算选中文本」禁用并说明（原先会算出空串的哈希）
+      SN.app.activeId = b1.id;
+      SN.tool.hash();
+      const hm = documentStub.querySelector("#modalHost");
+      assert(!clickableByText(hm, "计算选中文本"), "只读视图下「计算选中文本」不可点击");
+      let hashBtn = null;
+      walkNodes(hm, n => { if (!hashBtn && n.textContent === "计算选中文本") hashBtn = n; });
+      assert(hashBtn && hashBtn.disabled === true, "「计算选中文本」为禁用态");
+      assert(String(hashBtn.title).indexOf("大文本只读视图不支持") === 0, "禁用按钮带原因，实际=" + hashBtn.title);
+      SN.closeModal();
+
+      // 快捷键一览同样标注当前视图不可用的键
+      SN.dlg.shortcuts();
+      const texts = [];
+      walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
+      const allText = texts.join("|");
+      assert(allText.indexOf("Ctrl+S（大文本只读视图不支持保存/另存为）") >= 0, "一览标注不可用的 Ctrl+S");
+      assert(allText.indexOf("Ctrl+H（大文本只读视图不支持替换）") >= 0, "一览标注不可用的 Ctrl+H");
+      assert(allText.indexOf("Ctrl+F（") < 0, "可用的 Ctrl+F 不加标注");
+      SN.closeModal();
+
+      // 关于 → 视图能力表：只读展示，与能力矩阵/适配器同源
+      SN.dlg.caps();
+      const cm = documentStub.querySelector("#modalHost");
+      const capCells = byClass(cm, "capcell");
+      const capTexts = [];
+      walkNodes(cm, n => { if (n.textContent) capTexts.push(n.textContent); });
+      const capAll = capTexts.join("|");
+      assert(capAll.indexOf("视图能力表") >= 0, "能力表对话框已打开");
+      assert(capAll.indexOf("文本编辑") >= 0 && capAll.indexOf("大文本只读") >= 0 && capAll.indexOf("Hex 只读") >= 0, "三种视图列都在");
+      assert(capAll.indexOf("（当前）") >= 0, "标出当前视图列");
+      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("—") >= 0, "支持/不支持都有展示");
+      assert(capCells.length === SN.caps.DISPLAY.length * 3, "每项能力三列都有单元格，实际=" + capCells.length);
+      SN.closeModal();
+
+      // 展示行与能力矩阵必须完全一致（新增能力时不会漏展示、也不会展示不存在的项）
+      const shownCaps = SN.caps.DISPLAY.map(r => r[0]);
+      const matrixCaps = [];
+      Object.keys(SN.caps.MATRIX).forEach(k => SN.caps.MATRIX[k].caps.forEach(c => { if (matrixCaps.indexOf(c) < 0) matrixCaps.push(c); }));
+      assert(matrixCaps.every(c => shownCaps.indexOf(c) >= 0), "矩阵中的能力都有展示行，缺=" + matrixCaps.filter(c => shownCaps.indexOf(c) < 0).join(","));
+      assert(shownCaps.every(c => matrixCaps.indexOf(c) >= 0), "展示行都在矩阵中定义，多=" + shownCaps.filter(c => matrixCaps.indexOf(c) < 0).join(","));
+
+      // 三个视图适配器都注册了渲染器；打开默认值与会话策略都取自适配器
+      assert(!!SN.views.byKind("text").render && !!SN.views.byKind("big").render && !!SN.views.byKind("hex").render, "三种视图都注册了渲染器");
+      assert(SN.views.byKind("big").open.readOnly && SN.views.byKind("big").open.keepRawBytes && SN.views.byKind("big").open.decodeMode === "head", "大文本打开默认值来自适配器");
+      assert(SN.views.byKind("hex").open.decodeMode === "none" && SN.views.byKind("hex").open.fallbackEnc === "utf8", "Hex 打开默认值来自适配器");
+      assert(SN.views.byKind("text").open.decodeMode === "full" && SN.views.byKind("big").persistBody === false, "文本整篇解码、只读视图不持久化正文");
+      assert(SN.views.of(null).render === SN.views.byKind("text").render, "未知文档回退文本视图");
+      assert(!!SN.views.byKind("big").search && !!SN.views.byKind("big").markSelection && !!SN.views.byKind("big").jumpToLine, "大文本适配器提供分块检索/标记/定位行");
+      assert(!!SN.views.byKind("hex").exportBytes && !!SN.views.byKind("text").jumpToLine && !!SN.views.byKind("text").markSelection, "Hex 导出与文本定位/标记均已注册");
+
+      // 收敛护栏：行为模块里不应再出现按视图类型的比较（一律走 SN.caps / SN.views）
+      const offenders = [];
+      ["js/app.js", "js/app2.js", "js/storage.js"].forEach(f => {
+        fs.readFileSync(path.join(__dirname, f), "utf8").split("\n").forEach((line, i) => {
+          const code = line.replace(/\/\/.*$/, "");
+          if (/\bkind\s*[!=]==?\s*"(big|hex|text)"/.test(code)) offenders.push(f + ":" + (i + 1) + " " + code.trim());
+        });
+      });
+      assert(offenders.length === 0, "行为代码不再按视图 kind 分叉：\n" + offenders.join("\n"));
+
+      SN.app.activeId = d0.id;
+      SN.refreshMenus();
+    }
+
+    // 大文件的结果同样落在可折叠分组里（与普通文档同构）：重跑一次「当前文件中查找」以保证状态确定
     SN.app.activeId = b1.id;
-    const pBig = b1.bigFind();               // 打开关键字对话框
-    await new Promise(r => setTimeout(r, 0));
-    documentStub.querySelector("#bigFindKw").value = "needle";
-    const searchBtn = clickableByText(documentStub.querySelector("#modalHost"), "搜索");
-    assert(searchBtn, "大文件查找对话框有“搜索”按钮");
-    searchBtn.handlers.click[0]();
-    await pBig;
+    documentStub.querySelector("#findKey").handlers = {};
+    SN.dlg.find({ scope: "doc" });
+    documentStub.querySelector("#findKey").value = "needle";
+    await clickableByText(documentStub.querySelector("#modalHost"), "当前文件中查找").handlers.click[0]();
+    SN.closeModal();
     const bigView = documentStub.querySelector("#resultView");
     const bigGroups = byClass(bigView, "res-group");
     const bigRows = byClass(bigView, "res-row");
-    assert(bigGroups.length === 1, "大文件单文件搜索出一组结果，组数=" + bigGroups.length);
+    assert(bigGroups.length === 1, "大文件单文件查找出一组结果，组数=" + bigGroups.length);
     assert(bigRows.length === 2, "大文件结果行数=" + bigRows.length);
     const bigHead = byClass(bigView, "res-sec")[0];
-    assert(bigHead.textContent.indexOf("已全部列出 2 条") >= 0, "标题保留原命中统计，实际=" + bigHead.textContent);
+    assert(bigHead.textContent.indexOf("a.log（2）") >= 0, "标题含文件名与命中数，实际=" + bigHead.textContent);
     bigHead.handlers.click[0]();
     assert(bigGroups[0].classList.contains("collapsed"), "大文件单文件结果同样可折叠");
     bigHead.handlers.click[0]();

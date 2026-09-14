@@ -83,11 +83,12 @@
     const meta = Object.assign({}, session, { docs: undefined, list: [] });
     meta.list = (session.docs || []).map(d => {
       const m = { id: d.id, name: d.name, path: d.path || "", kind: d.kind || "text", enc: d.enc || "utf8", eol: d.eol || "lf", lang: d.lang || "txt", dirty: !!d.dirty, handle: !!d.handle, size: d.size };
-      const isText = m.kind === "text";
+      // 是否持久化正文由视图适配器决定（只读视图不落库）
+      const keepBody = SN.views.byKind(m.kind).persistBody;
       const len = (d.content || "").length;
-      if (isText && len > 0 && len <= SESSION_TEXT_CAP) {
+      if (keepBody && len > 0 && len <= SESSION_TEXT_CAP) {
         docPut(d.id, { text: d.content });
-      } else if (!isText || len > SESSION_TEXT_CAP) {
+      } else if (!keepBody || len > SESSION_TEXT_CAP) {
         m.tooBig = true;   // 大文件正文不持久化，重启后不自动恢复
       }
       if (d.handle && d.handle.queryPermission) {

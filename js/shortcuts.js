@@ -7,6 +7,8 @@
 (function () {
   const SN = (window.SN = window.SN || {});
 
+  // requires 语义：该快捷键需要当前视图具备的能力（见 js/viewcaps.js），
+  //   缺少该项能力时不会执行，而是给出统一提示；这也是「只读模式」下键位策略的唯一来源。
   // where 语义（决定谁负责响应，避免双重执行）：
   //   "global" 由全局 keydown 分发，本表 run 会被执行
   //   "editor" 由文本域内的 editor.js 自行处理（run 供将来改键时直接调用，不参与全局分发）
@@ -14,30 +16,31 @@
   const DEFS = [
     { id: "file.new", group: "文件", label: "新建", accel: "Ctrl+T", where: "global", run: () => SN.cmd.new() },
     { id: "file.open", group: "文件", label: "打开…", accel: "Ctrl+O", where: "global", run: () => SN.cmd.open("auto") },
-    { id: "file.save", group: "文件", label: "保存", accel: "Ctrl+S", where: "global", run: () => SN.cmd.save() },
-    { id: "file.saveAs", group: "文件", label: "另存为…", accel: "Ctrl+Shift+S", where: "global", run: () => SN.cmd.saveAs() },
+    { id: "file.save", group: "文件", label: "保存", accel: "Ctrl+S", where: "global", requires: "save", run: () => SN.cmd.save() },
+    { id: "file.saveAs", group: "文件", label: "另存为…", accel: "Ctrl+Shift+S", where: "global", requires: "save", run: () => SN.cmd.saveAs() },
     { id: "file.closeTab", group: "文件", label: "关闭标签", accel: "Ctrl+W", where: "global", run: () => SN.cmd.closeTab() },
 
-    { id: "edit.undo", group: "编辑", label: "撤销", accel: "Ctrl+Z", where: "editor", run: () => { const ed = SN.activeEditor(); if (ed) ed.undo(); } },
-    { id: "edit.redo", group: "编辑", label: "重做", accel: "Ctrl+Y", where: "editor", run: () => { const ed = SN.activeEditor(); if (ed) ed.redo(); } },
-    { id: "edit.redoAlt", group: "编辑", label: "重做（备用键）", accel: "Ctrl+Shift+Z", where: "editor", run: () => { const ed = SN.activeEditor(); if (ed) ed.redo(); } },
-    { id: "edit.cut", group: "编辑", label: "剪切", accel: "Ctrl+X", where: "native" },
-    { id: "edit.copy", group: "编辑", label: "复制", accel: "Ctrl+C", where: "native" },
-    { id: "edit.paste", group: "编辑", label: "粘贴", accel: "Ctrl+V", where: "native" },
-    { id: "edit.selectAll", group: "编辑", label: "全选", accel: "Ctrl+A", where: "native" },
-    { id: "edit.goto", group: "编辑", label: "跳转行…", accel: "Ctrl+G", where: "global", run: () => SN.dlg.gotoLine() },
-    { id: "edit.columnEdit", group: "编辑", label: "列块编辑…", accel: "Alt+X", where: "global", run: () => SN.dlg.columnEdit() },
-    { id: "line.dup", group: "编辑", label: "复制当前行", accel: "Ctrl+D", where: "global", run: () => SN.cmd.lineOp("dup") },
+    { id: "edit.undo", group: "编辑", label: "撤销", accel: "Ctrl+Z", where: "editor", requires: "undo", run: () => { const ed = SN.activeEditor(); if (ed) ed.undo(); } },
+    { id: "edit.redo", group: "编辑", label: "重做", accel: "Ctrl+Y", where: "editor", requires: "undo", run: () => { const ed = SN.activeEditor(); if (ed) ed.redo(); } },
+    { id: "edit.redoAlt", group: "编辑", label: "重做（备用键）", accel: "Ctrl+Shift+Z", where: "editor", requires: "undo", run: () => { const ed = SN.activeEditor(); if (ed) ed.redo(); } },
+    { id: "edit.cut", group: "编辑", label: "剪切", accel: "Ctrl+X", where: "native", requires: "clipboard" },
+    { id: "edit.copy", group: "编辑", label: "复制", accel: "Ctrl+C", where: "native", requires: "clipboard" },
+    { id: "edit.paste", group: "编辑", label: "粘贴", accel: "Ctrl+V", where: "native", requires: "clipboard" },
+    { id: "edit.selectAll", group: "编辑", label: "全选", accel: "Ctrl+A", where: "native", requires: "clipboard" },
+    { id: "edit.goto", group: "编辑", label: "跳转行…", accel: "Ctrl+G", where: "global", requires: "gotoLine", run: () => SN.dlg.gotoLine() },
+    { id: "edit.columnEdit", group: "编辑", label: "列块编辑…", accel: "Alt+X", where: "global", requires: "columnEdit", run: () => SN.dlg.columnEdit() },
+    { id: "line.dup", group: "编辑", label: "复制当前行", accel: "Ctrl+D", where: "global", requires: "edit", run: () => SN.cmd.lineOp("dup") },
 
-    { id: "find.open", group: "查找", label: "查找…", accel: "Ctrl+F", where: "global", run: () => SN.dlg.find("find") },
-    { id: "find.replace", group: "查找", label: "替换…", accel: "Ctrl+H", where: "global", run: () => SN.dlg.find("replace") },
-    { id: "find.next", group: "查找", label: "查找下一个", accel: "F3", where: "global", run: () => SN.dlg.findNext() },
-    { id: "find.prev", group: "查找", label: "查找上一个", accel: "F4", where: "global", run: () => SN.dlg.findPrev() },
-    { id: "find.openDocs", group: "查找", label: "在打开的文档中查找…", accel: "Ctrl+Shift+F", where: "global", run: () => SN.dlg.find("opendocs") },
+    // 统一查找对话框本身在所有视图都可用（作用域按钮会按能力禁用），故不设 requires
+    { id: "find.open", group: "查找", label: "查找…", accel: "Ctrl+F", where: "global", run: () => SN.dlg.find({ scope: "doc" }) },
+    { id: "find.openDocs", group: "查找", label: "查找…（默认查所有打开文件）", accel: "Ctrl+Shift+F", where: "global", run: () => SN.dlg.find({ scope: "docs" }) },
+    { id: "find.replace", group: "查找", label: "替换…", accel: "Ctrl+H", where: "global", requires: "replace", run: () => SN.dlg.find({ scope: "doc", replace: true }) },
+    { id: "find.next", group: "查找", label: "查找下一个", accel: "F3", where: "global", requires: "findStep", run: () => SN.dlg.findNext() },
+    { id: "find.prev", group: "查找", label: "查找上一个", accel: "F4", where: "global", requires: "findStep", run: () => SN.dlg.findPrev() },
 
-    { id: "bookmark.toggle", group: "书签", label: "设置/移除书签", accel: "Ctrl+F2", where: "global", run: () => SN.cmd.toggleBookmark() },
-    { id: "bookmark.next", group: "书签", label: "下一个书签", accel: "F2", where: "global", run: () => SN.cmd.gotoBookmark(1) },
-    { id: "bookmark.prev", group: "书签", label: "上一个书签", accel: "Shift+F2", where: "global", run: () => SN.cmd.gotoBookmark(-1) }
+    { id: "bookmark.toggle", group: "书签", label: "设置/移除书签", accel: "Ctrl+F2", where: "global", requires: "bookmark", run: () => SN.cmd.toggleBookmark() },
+    { id: "bookmark.next", group: "书签", label: "下一个书签", accel: "F2", where: "global", requires: "bookmark", run: () => SN.cmd.gotoBookmark(1) },
+    { id: "bookmark.prev", group: "书签", label: "上一个书签", accel: "Shift+F2", where: "global", requires: "bookmark", run: () => SN.cmd.gotoBookmark(-1) }
   ];
 
   // 用户改键覆盖：{ id: "按键串" }，由后续「自定义快捷键」写入并持久化
@@ -92,11 +95,30 @@
     return null;
   }
 
+  // 该快捷键在当前视图是否可用（无 requires 视作永远可用）
+  function available(id, doc) {
+    const it = byId(id);
+    if (!it || !it.requires) return true;
+    return !(SN.caps && !SN.caps.can(it.requires, doc));
+  }
+  // 不可用原因（可用时返回空串），供菜单置灰 tooltip 与一览对话框复用
+  function blockedReason(item, doc) {
+    const it = typeof item === "string" ? byId(item) : item;
+    if (!it || !it.requires || !SN.caps) return "";
+    return SN.caps.reason(it.requires, doc);
+  }
+
   // 全局 keydown 入口：命中则 preventDefault 并执行，返回命中项（未命中返回 null）
+  // 当前视图缺少该能力时不执行，而是给出与菜单置灰一致的说明（避免“按了没反应”）
   function dispatch(e) {
     const hit = findEvent(e);
     if (!hit) return null;
     if (e.preventDefault) e.preventDefault();
+    if (!available(hit.id)) {
+      const why = blockedReason(hit);
+      if (SN.toast) SN.toast(why);
+      return Object.assign({}, hit, { blocked: true, reason: why });
+    }
     hit.run();
     return hit;
   }
@@ -131,6 +153,6 @@
 
   SN.shortcuts = {
     DEFS, byId, parse, matchEvent, accelOf, items, findEvent, dispatch,
-    groups, conflicts, setOverrides, resetOverrides
+    groups, conflicts, setOverrides, resetOverrides, available, blockedReason
   };
 })();

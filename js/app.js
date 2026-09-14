@@ -137,9 +137,15 @@
       const scDef = it.sc ? SN.shortcuts.byId(it.sc) : null;
       const accel = it.sc ? SN.shortcuts.accelOf(it.sc) : it.accel;
       if (accel) mi.appendChild(el("span", { class: "accel", text: accel }));
-      if (it.tip) mi.title = it.tip;
+      // 视图能力（js/viewcaps.js）：当前文档不具备所需能力时置灰，
+      // 并把「为什么不可用」写进 tooltip，取代点下去毫无反应的旧行为。
+      const req = it.requires || (scDef && scDef.requires);
+      const blockedWhy = req && SN.caps ? SN.caps.reason(req, activeDoc()) : "";
+      if (blockedWhy) mi.classList.add("disabled");
+      const tip = blockedWhy || it.tip;
+      if (tip) mi.title = tip;
       const act = it.action || (scDef && scDef.run ? scDef.run : null);
-      if (!it.disabled && act) mi.addEventListener("click", (e) => {
+      if (!it.disabled && !blockedWhy && act) mi.addEventListener("click", (e) => {
         e.stopPropagation();
         if (it.stay) {
           act();
@@ -162,7 +168,7 @@
       if (l.id === "txt") continue;
       const key = l.name[0] ? l.name[0].toUpperCase() : "?";
       (groups[key] = groups[key] || []).push({
-        label: l.name, action: () => setActiveLang(l.id)
+        label: l.name, requires: "lang", action: () => setActiveLang(l.id)
       });
     }
     const out = [];
@@ -170,16 +176,17 @@
       out.push({ label: g, sub: groups[g] });
     });
     out.push("-");
-    out.push({ label: "XML", action: () => setActiveLang("xml") });
-    out.push({ label: "YAML", action: () => setActiveLang("yaml") });
-    out.push({ label: "TXT", action: () => setActiveLang("txt") });
+    out.push({ label: "XML", requires: "lang", action: () => setActiveLang("xml") });
+    out.push({ label: "YAML", requires: "lang", action: () => setActiveLang("yaml") });
+    out.push({ label: "TXT", requires: "lang", action: () => setActiveLang("txt") });
     out.push({ label: "用户自定义语言…", action: () => cmd.openDefineLang() });
     return out;
   }
 
   function setActiveLang(langId) {
     const d = activeDoc();
-    if (!d || d.kind !== "text") return;
+    if (!d) return;
+    if (!SN.caps.can("lang", d)) { setMsg(SN.caps.reason("lang", d)); return; }
     d.lang = langId;
     const ed = d.editor;
     if (ed) ed.langId = langId;
@@ -196,9 +203,9 @@
         { label: "以文本模式打开…", action: () => cmd.open("text") },
         { label: "以二进制(Hex)打开…", action: () => cmd.open("hex") },
         "-",
-        { label: "保存", sc: "file.save" },
-        { label: "全部保存", action: () => cmd.saveAll() },
-        { label: "另存为…", sc: "file.saveAs" },
+        { label: "保存", sc: "file.save", requires: "save" },
+        { label: "全部保存", requires: "save", action: () => cmd.saveAll() },
+        { label: "另存为…", sc: "file.saveAs", requires: "save" },
         { label: "重命名…", action: () => cmd.renameActive() },
         "-",
         { label: "关闭标签", sc: "file.closeTab" },
@@ -211,35 +218,35 @@
         { label: "退出(仅关闭本页标签集)", action: () => persistSession() }
       ]},
       { label: "编辑", items: [
-        { label: "撤销", sc: "edit.undo" },
-        { label: "重做", sc: "edit.redo" },
+        { label: "撤销", sc: "edit.undo", requires: "undo" },
+        { label: "重做", sc: "edit.redo", requires: "undo" },
         "-",
-        { label: "剪切", sc: "edit.cut", action: () => execNative("cut") },
-        { label: "复制", sc: "edit.copy", action: () => execNative("copy") },
-        { label: "粘贴", sc: "edit.paste", action: () => execNative("paste") },
+        { label: "剪切", sc: "edit.cut", requires: "clipboard", action: () => execNative("cut") },
+        { label: "复制", sc: "edit.copy", requires: "clipboard", action: () => execNative("copy") },
+        { label: "粘贴", sc: "edit.paste", requires: "clipboard", action: () => execNative("paste") },
         "-",
-        { label: "全选", sc: "edit.selectAll", action: () => execNative("selectAll") },
+        { label: "全选", sc: "edit.selectAll", requires: "clipboard", action: () => execNative("selectAll") },
         "-",
         { label: "跳转行…", sc: "edit.goto" },
         "-",
         { label: "换行符转换", sub: [
-          { label: "转为 Windows(CR+LF)", action: () => cmd.eolConv("crlf") },
-          { label: "转为 Unix(LF)", action: () => cmd.eolConv("lf") },
-          { label: "转为 Mac(CR)", action: () => cmd.eolConv("cr") }
+          { label: "转为 Windows(CR+LF)", requires: "edit", action: () => cmd.eolConv("crlf") },
+          { label: "转为 Unix(LF)", requires: "edit", action: () => cmd.eolConv("lf") },
+          { label: "转为 Mac(CR)", requires: "edit", action: () => cmd.eolConv("cr") }
         ]},
         { label: "空白字符操作", sub: [
-          { label: "移除行首空白", action: () => cmd.blankOp("head") },
-          { label: "移除行尾空白", action: () => cmd.blankOp("end") },
-          { label: "移除首尾空白", action: () => cmd.blankOp("both") },
+          { label: "移除行首空白", requires: "edit", action: () => cmd.blankOp("head") },
+          { label: "移除行尾空白", requires: "edit", action: () => cmd.blankOp("end") },
+          { label: "移除首尾空白", requires: "edit", action: () => cmd.blankOp("both") },
           "-",
-          { label: "TAB → 空格", action: () => cmd.tabOp("tab2space") },
-          { label: "空格 → TAB(全部)", action: () => cmd.tabOp("space2tabAll") },
-          { label: "空格 → TAB(行首)", action: () => cmd.tabOp("space2tabLead") }
+          { label: "TAB → 空格", requires: "edit", action: () => cmd.tabOp("tab2space") },
+          { label: "空格 → TAB(全部)", requires: "edit", action: () => cmd.tabOp("space2tabAll") },
+          { label: "空格 → TAB(行首)", requires: "edit", action: () => cmd.tabOp("space2tabLead") }
         ]},
         { label: "大小写转换", sub: caseItems() },
         { label: "行编辑", sub: lineItems() },
         "-",
-        { label: "列块编辑…", sc: "edit.columnEdit" },
+        { label: "列块编辑…", sc: "edit.columnEdit", requires: "columnEdit" },
         { label: "列块模式(勾选进行多选)", checked: false, id: "colmode", disabled: true, tip: "浏览器多选区受限，请使用列块编辑对话框" }
       ]},
       { label: "查找", items: findMenuItems() },
@@ -256,17 +263,20 @@
         { label: "English(占位，未提供)", disabled: true, tip: "本演示版仅提供中文界面" }
       ]},
       { label: "工具", items: [
-        { label: "XML 格式化", action: () => tool.format("xml") },
-        { label: "JSON 格式化", action: () => tool.format("json") },
+        { label: "XML 格式化", requires: "format", action: () => tool.format("xml") },
+        { label: "JSON 格式化", requires: "format", action: () => tool.format("json") },
         { label: "MD5/SHA 计算…", action: () => tool.hash() },
-        { label: "列块编辑…", action: () => dlg.columnEdit() },
+        { label: "列块编辑…", requires: "columnEdit", action: () => dlg.columnEdit() },
         "-",
         { label: "批量转换编码(打开文档)", action: () => tool.batchEncode() },
         "-",
-        { label: "统计选中行/字数", action: () => cmd.edStatus() }
+        { label: "统计选中行/字数", requires: "statusPos", action: () => cmd.edStatus() }
       ]},
-      { label: "插件", items: SN.pluginMenuItems() },
-      { label: "关于", items: [{ label: "关于 StackNote", action: () => dlg.about() }] }
+      { label: "插件", items: SN.pluginMenuItems().map(it => (it && it.action ? Object.assign({ requires: "plugin" }, it) : it)) },
+      { label: "关于", items: [
+        { label: "关于 StackNote", action: () => dlg.about() },
+        { label: "视图能力表…", action: () => dlg.caps() }
+      ] }
     ];
     buildMenu(menus);
   }
@@ -281,10 +291,9 @@
   function findMenuItems() {
     return [
       { label: "查找…", sc: "find.open" },
-      { label: "替换…", sc: "find.replace" },
-      { label: "查找下一个", sc: "find.next" },
-      { label: "查找上一个", sc: "find.prev" },
-      { label: "在打开的文档中查找…", sc: "find.openDocs" },
+      { label: "替换…", sc: "find.replace", requires: "replace" },
+      { label: "查找下一个", sc: "find.next", requires: "findStep" },
+      { label: "查找上一个", sc: "find.prev", requires: "findStep" },
       "-",
       { label: "全部标记(Mark All)", action: () => cmd.markAll() },
       { label: "清除全部标记", action: () => cmd.clearMarksAll() },
@@ -299,19 +308,19 @@
   function viewItems() {
     const s = app.settings;
     return [
-      { label: "自动换行", checked: s.wrap, action: () => cmd.toggleWrap() },
-      { label: "显示空白", checked: s.showSpaces, action: () => cmd.toggleSpaces() },
-      { label: "显示行尾", checked: s.showEol, action: () => cmd.toggleEol() },
+      { label: "自动换行", checked: s.wrap, requires: "view", action: () => cmd.toggleWrap() },
+      { label: "显示空白", checked: s.showSpaces, requires: "view", action: () => cmd.toggleSpaces() },
+      { label: "显示行尾", checked: s.showEol, requires: "view", action: () => cmd.toggleEol() },
       "-",
-      { label: "高亮 Web 地址", checked: s.webAddrHighlight, action: () => cmd.toggleWeb() },
+      { label: "高亮 Web 地址", checked: s.webAddrHighlight, requires: "view", action: () => cmd.toggleWeb() },
       { label: "文件列表窗口", checked: !SN.$("#fileDock").classList.contains("hidden"), action: () => cmd.toggleFileDock() },
       { label: "工具栏", checked: !SN.$("#toolbar").classList.contains("hidden"), action: () => cmd.toggleToolbar() }
     ];
   }
   function encItems() {
     return [
-      { label: "以编码重新加载", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, action: () => cmd.reloadWith(c.id) })) },
-      { label: "转换为编码", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, action: () => cmd.convertTo(c.id) })) },
+      { label: "以编码重新加载", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, requires: "encoding", action: () => cmd.reloadWith(c.id) })) },
+      { label: "转换为编码", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, requires: "encoding", action: () => cmd.convertTo(c.id) })) },
       "-",
       { label: "批量转换编码…", action: () => tool.batchEncode() }
     ];
@@ -321,22 +330,22 @@
       ["upper", "UPPERCASE"], ["lower", "lowercase"], ["proper", "Proper Case"],
       ["properB", "Proper Case(保留已大写)"], ["sentence", "Sentence case"], ["invert", "Invert Case"], ["random", "Random Case"]
     ];
-    return defs.map(([id, l]) => ({ label: l, action: () => cmd.caseOp(id) }));
+    return defs.map(([id, l]) => ({ label: l, requires: "edit", action: () => cmd.caseOp(id) }));
   }
   function lineItems() {
     return [
-      { label: "复制当前行", sc: "line.dup" },
-      { label: "删除行(删除连续重复行)", action: () => cmd.lineOp("delDupConsec") },
-      { label: "删除所有重复行", action: () => cmd.lineOp("delDupAll") },
-      { label: "拆分长行", action: () => cmd.lineOp("split") },
+      { label: "复制当前行", sc: "line.dup", requires: "edit" },
+      { label: "删除行(删除连续重复行)", requires: "edit", action: () => cmd.lineOp("delDupConsec") },
+      { label: "删除所有重复行", requires: "edit", action: () => cmd.lineOp("delDupAll") },
+      { label: "拆分长行", requires: "edit", action: () => cmd.lineOp("split") },
       "-",
-      { label: "上移当前行", action: () => cmd.lineOp("up") },
-      { label: "下移当前行", action: () => cmd.lineOp("down") },
+      { label: "上移当前行", requires: "edit", action: () => cmd.lineOp("up") },
+      { label: "下移当前行", requires: "edit", action: () => cmd.lineOp("down") },
       "-",
-      { label: "删除空行", action: () => cmd.lineOp("delEmpty") },
-      { label: "删除空行(含纯空白行)", action: () => cmd.lineOp("delEmptyWs") },
+      { label: "删除空行", requires: "edit", action: () => cmd.lineOp("delEmpty") },
+      { label: "删除空行(含纯空白行)", requires: "edit", action: () => cmd.lineOp("delEmptyWs") },
       "-",
-      { label: "反转行序", action: () => cmd.lineOp("reverse") },
+      { label: "反转行序", requires: "edit", action: () => cmd.lineOp("reverse") },
       { label: "排序", sub: sortItems() }
     ];
   }
@@ -345,14 +354,14 @@
       ["lex_asc", "字典升序"], ["lex_desc", "字典降序"], ["lexci_asc", "忽略大小写升序"],
       ["lexci_desc", "忽略大小写降序"], ["num_asc", "数值升序"], ["num_desc", "数值降序"]
     ];
-    return ds.map(([id, l]) => ({ label: l, action: () => cmd.sortOp(id) }));
+    return ds.map(([id, l]) => ({ label: l, requires: "edit", action: () => cmd.sortOp(id) }));
   }
   function bookMarkItems() {
     return [
-      { label: "设置/移除书签", sc: "bookmark.toggle" },
-      { label: "下一个书签", sc: "bookmark.next" },
-      { label: "上一个书签", sc: "bookmark.prev" },
-      { label: "清除全部书签", action: () => cmd.clearBookmarks() }
+      { label: "设置/移除书签", sc: "bookmark.toggle", requires: "bookmark" },
+      { label: "下一个书签", sc: "bookmark.next", requires: "bookmark" },
+      { label: "上一个书签", sc: "bookmark.prev", requires: "bookmark" },
+      { label: "清除全部书签", requires: "bookmark", action: () => cmd.clearBookmarks() }
     ];
   }
   function markColorItems() {
@@ -361,16 +370,11 @@
       stay: true, rebuild: true,
       action: () => {
         app.curMarkColor = c; app.settings.markColorIdx = i; saveSettings();
-        const ed = SN.activeEditor();
-        if (ed && ed.hasSelection() && ed.selectedText().trim() && SN.cmd.markSelected) {
-          SN.cmd.markSelected();
-        } else {
-          // 大文件视图没有 Editor：用最近在视图内选中的文本标记（连续换色即重新高亮）
-          const d = SN.activeDoc();
-          if (d && d.kind === "big" && d.bigSelected && d.bigSelected() && SN.cmd.markSelected) {
-            SN.cmd.markSelected();
-          }
-        }
+        // 是否有可标记的选中内容由视图适配器判断（编辑器选区 / 大文件视图内最近一次选中），
+        // 连续换色即用新颜色重新高亮
+        const d = SN.activeDoc();
+        const kw = d ? SN.views.of(d).selectionKeyword(d) : "";
+        if (kw && SN.cmd.markSelected) SN.cmd.markSelected();
       }
     }));
   }
@@ -379,37 +383,44 @@
   const TB = {
     new: { t: "新建(Ctrl+T)", g: "📄", a: () => cmd.new() },
     open: { t: "打开", g: "📂", a: () => cmd.open("auto") },
-    save: { t: "保存", g: "💾", a: () => cmd.save() },
-    saveall: { t: "全部保存", g: "💿", a: () => cmd.saveAll() },
+    save: { t: "保存", g: "💾", requires: "save", a: () => cmd.save() },
+    saveall: { t: "全部保存", g: "💿", requires: "save", a: () => cmd.saveAll() },
     close: { t: "关闭", g: "❌", a: () => cmd.closeTab() },
     closeall: { t: "关闭全部", g: "🗑", a: () => cmd.closeAll() },
     sep1: "-",
-    cut: { t: "剪切", g: "✂️", a: () => execNative("cut") },
-    copy: { t: "复制", g: "📑", a: () => execNative("copy") },
-    paste: { t: "粘贴", g: "📋", a: () => execNative("paste") },
+    cut: { t: "剪切", g: "✂️", requires: "clipboard", a: () => execNative("cut") },
+    copy: { t: "复制", g: "📑", requires: "clipboard", a: () => execNative("copy") },
+    paste: { t: "粘贴", g: "📋", requires: "clipboard", a: () => execNative("paste") },
     sep2: "-",
-    undo: { t: "撤销", g: "↺", a: () => edCmd("undo") },
-    redo: { t: "重做", g: "↻", a: () => edCmd("redo") },
+    undo: { t: "撤销", g: "↺", requires: "undo", a: () => edCmd("undo") },
+    redo: { t: "重做", g: "↻", requires: "undo", a: () => edCmd("redo") },
     sep3: "-",
-    find: { t: "查找", g: "🔍", a: () => dlg.find("find") },
-    replace: { t: "替换", g: "🔁", a: () => dlg.find("replace") },
+    find: { t: "查找", g: "🔍", a: () => dlg.find({ scope: "doc" }) },
+    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find({ scope: "doc", replace: true }) },
     mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",
-    zoomin: { t: "放大", g: "➕", a: () => cmd.zoom(10) },
-    zoomout: { t: "缩小", g: "➖", a: () => cmd.zoom(-10) },
+    zoomin: { t: "放大", g: "➕", requires: "zoom", a: () => cmd.zoom(10) },
+    zoomout: { t: "缩小", g: "➖", requires: "zoom", a: () => cmd.zoom(-10) },
     sep5: "-",
-    wrap: { t: "自动换行", g: "⇆", toggle: () => app.settings.wrap, a: () => cmd.toggleWrap() },
-    blank: { t: "显示空白/制表符", g: "␣", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() }
+    wrap: { t: "自动换行", g: "⇆", requires: "view", toggle: () => app.settings.wrap, a: () => cmd.toggleWrap() },
+    blank: { t: "显示空白/制表符", g: "␣", requires: "view", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() }
   };
   function buildToolbar() {
     toolbar.textContent = "";
     for (const key of Object.keys(TB)) {
       const def = TB[key];
       if (def === "-") { toolbar.appendChild(el("div", { class: "tbsep" })); continue; }
-      const b = el("button", { class: "iconbt" + (def.toggle && def.toggle() ? " on" : ""), title: def.t, text: def.g });
+      // 同菜单：当前视图不具备所需能力时置灰并说明原因（不接点击，tooltip 仍可见）
+      const why = def.requires && SN.caps ? SN.caps.reason(def.requires, activeDoc()) : "";
+      const b = el("button", {
+        class: "iconbt" + (def.toggle && def.toggle() ? " on" : "") + (why ? " disabled" : ""),
+        title: why ? (def.t + " — " + why) : def.t,
+        text: def.g
+      });
+      if (why) b.setAttribute("aria-disabled", "true");
       if (def.disabled) b.disabled = true;
-      if (def.a) b.addEventListener("click", def.a);
+      if (def.a && !why) b.addEventListener("click", def.a);
       toolbar.appendChild(b);
     }
   }
@@ -437,7 +448,8 @@
     tab.dataset.id = doc.id;
     const title = el("span", { class: "ttitle", text: doc.name });
     const dirty = el("span", { class: "dirty" + (doc.dirty ? "" : " hidden"), text: "*" });
-    const mode = doc.kind === "hex" ? "⛭" : doc.kind === "big" ? "≫" : doc.readOnly ? "🔒" : "";
+    // 标签上的模式标记由视图适配器提供（Hex ⛭ / 大文本 ≫ / 只读文本 🔒）
+    const mode = SN.views.of(doc).tabTag || (doc.readOnly ? "🔒" : "");
     const x = el("span", { class: "tx", title: "关闭", text: "×" });
     tab.appendChild(dirty);
     tab.appendChild(title);
@@ -482,33 +494,54 @@
     showCtx(e.clientX, e.clientY, html);
   }
 
+  // 文本视图适配器：Editor 的构造依赖本文件内部回调（改动标记、状态栏、双击取词），故在此注册。
+  // 大文本/Hex 的渲染分别由 bigtext.js 与 app2.js 注册（它们拥有各自的视图实现）。
+  function renderTextPage(doc, page) {
+    const ed = new SN.Editor({
+      readOnly: doc.readOnly,
+      wrap: app.settings.wrap,
+      showSpaces: app.settings.showSpaces,
+      showEol: app.settings.showEol,
+      langId: doc.lang,
+      onChange: (text) => { onEditorChange(doc, text); },
+      onStatus: (info) => { onEditorStatus(doc, info); },
+      onWordDbl: (w) => { if (app.settings.wordDblHighlight) wordHighlight(w); },
+      onActive: () => activateDoc(doc.id)
+    });
+    ed.setText(doc.content || "");
+    doc.editor = ed;
+    page.appendChild(ed.wrapEl);
+    return true;
+  }
+  SN.views.define("text", {
+    render: renderTextPage,
+    jumpToLine: (doc, n) => { if (doc.editor) doc.editor.gotoLine(n); },
+    selectionKeyword: (doc) => (doc.editor && doc.editor.hasSelection() ? doc.editor.selectedText().trim() : "")
+  });
+
+  // 页面渲染统一入口：具体怎么做交给视图适配器，这里不再出现 if (doc.kind === ...)
+  function fillPage(doc, page) {
+    const ad = SN.views.of(doc);
+    if (ad.render && ad.render(doc, page)) return;
+    page.appendChild(el("div", { text: SN.caps.label(doc) + "视图不可用（对应模块未加载）", class: "hint" }));
+  }
   function buildPage(doc) {
     const page = el("div", { class: "page" + (doc.id === app.activeId ? " active" : "") });
     page.dataset.doc = doc.id;
-    if (doc.kind === "hex") {
-      page.appendChild(buildHexView(doc));
-    } else if (doc.kind === "big") {
-      if (SN.buildBigTextPage) page.appendChild(SN.buildBigTextPage(doc));
-      else { page.appendChild(el("div", { text: "大文本视图不可用（bigtext.js 未加载）", class: "hint" })); }
-    } else {
-      const ed = new SN.Editor({
-        readOnly: doc.readOnly || doc.kind === "big",
-        wrap: app.settings.wrap,
-        showSpaces: app.settings.showSpaces,
-        showEol: app.settings.showEol,
-        langId: doc.lang,
-        onChange: (text, editor) => { onEditorChange(doc, text); },
-        onStatus: (info) => onEditorStatus(doc, info),
-        onWordDbl: (w) => { if (app.settings.wordDblHighlight) wordHighlight(w); },
-        onActive: (ed) => activateDoc(doc.id)
-      });
-      ed.setText(doc.content || "");
-      doc.editor = ed;
-      page.appendChild(ed.wrapEl);
-    }
+    fillPage(doc, page);
     editorZone.appendChild(page);
     doc.pageEl = page;
   }
+  // 视图类型切换（文本/大文本/Hex）后重建页面
+  SN.rebuildDocPage = function (doc) {
+    if (doc.pageEl) doc.pageEl.remove();
+    const page = el("div", { class: "page" });
+    page.dataset.doc = doc.id;
+    fillPage(doc, page);
+    editorZone.appendChild(page);
+    doc.pageEl = page;
+    activateDoc(doc.id);
+  };
 
   function activateDoc(id, skipFocus) {
     const d = docById(id);
@@ -516,7 +549,7 @@
     app.activeId = id;
     SN.$$("#editorZone .page").forEach(p => p.classList.toggle("active", p.dataset.doc === id));
     updateTabNodes();
-    if (d.kind !== "hex" && d.editor && !skipFocus) d.editor.focus();
+    if (d.editor && !skipFocus) d.editor.focus();
     refreshMenus();
     updateStatus();
     if (SN.updateFileList) SN.updateFileList();
@@ -556,7 +589,7 @@
 
   function updateTitle() {
     const d = activeDoc();
-    const mode = d ? (d.kind === "hex" ? "HexReadOnly" : d.kind === "big" ? "BigTextRO" : d.readOnly ? "RO" : "") : "";
+    const mode = d ? (SN.views.of(d).modeTag || (d.readOnly ? "RO" : "")) : "";
     document.title = (d ? (d.dirty ? "*" : "") + d.name + (mode ? " [" + mode + "]" : "") + " - " : "") + "StackNote";
   }
 
@@ -568,6 +601,12 @@
     SN.$("#codeLabel").textContent = SN.codeById(d.enc).name;
     const eol = SN.$("#eolSel");
     if (eol.value !== d.eol) eol.value = d.eol;
+    // 行列定位只由 Editor 上报：大文件/Hex 视图没有 Editor，若不显式改写，
+    // 状态栏会一直停留在上一个文档的 Ln/Col（看起来像当前文档的位置）。
+    if (SN.caps && !SN.caps.can("statusPos", d)) {
+      SN.$("#posLabel").textContent = SN.caps.reason("statusPos", d);
+    }
+    if (eol) eol.disabled = !!(SN.caps && !SN.caps.can("eolSwitch", d));
     updateTitle();
   }
 
@@ -643,42 +682,41 @@
       else if (hasNul && det.id !== "utf16le" && det.id !== "utf16be") kind = "hex";
       else if (isBig && (det.id === "utf16le" || det.id === "utf16be")) kind = "big";
       console.info("[open]", file.name, "size="+size, "limit="+bigLimit, "mode="+mode, "kind="+kind, "hasNul="+hasNul, "enc="+det.id);
+      // 视图类型判定到此为止（打开流程里唯一一次判定）；之后该视图怎么存、怎么解码都取自适配器
+      const view = SN.views.byKind(kind);
 
       const d = {
         id: SN.uid(),
         name: file.name,
         path: file.name,
         kind,
-        enc: kind === "hex" ? "utf8" : det.id,
+        enc: view.open.fallbackEnc || det.id,
         eol: "lf",
         lang: SN.detectLangByName(file.name),
         dirty: false,
-        readOnly: kind === "big",
+        readOnly: !!view.open.readOnly,
         handle: handle || null,
         size,
-        // 仅保留必要原始字节：hex/大文本必须；普通文本只在小文件时保留（用于“按编码重载”）
-        raw: kind === "hex" || kind === "big" ? bytes : (size <= 2 * 1024 * 1024 ? bytes : null)
+        // 仅保留必要原始字节：只读视图必须；普通文本只在小文件时保留（用于“按编码重载”）
+        raw: (view.open.keepRawBytes || size <= 2 * 1024 * 1024) ? bytes : null
       };
-      if (kind === "hex") {
+      if (view.open.decodeMode === "none") {
+        d.content = "";
+      } else if (view.open.decodeMode === "head") {
+        // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
+        const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
+        d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
         d.content = "";
       } else {
-        if (kind === "big") {
-          // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
-          const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
-          d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
-          d.content = "";
-        } else {
-          let text = SN.decodeBytes(bytes, d.enc);
-          d.eol = SN.detectEol(text);
-          d.content = SN.normalizeEol(text, "lf");
-        }
+        let text = SN.decodeBytes(bytes, d.enc);
+        d.eol = SN.detectEol(text);
+        d.content = SN.normalizeEol(text, "lf");
       }
       addDoc(d);
       activateDoc(d.id);
       if (handle) pushRecent({ name: d.name, handle });
       else pushRecent({ name: d.name });
-      setMsg("已打开 " + d.name + "（" + SN.fmtSize(size) + "，" + SN.codeById(d.enc).name +
-        (kind === "big" ? "，大文本只读/虚拟滚动模式" : "") + "）");
+      setMsg("已打开 " + d.name + "（" + SN.fmtSize(size) + "，" + SN.codeById(d.enc).name + view.open.note + "）");
       scheduleSaveSession();
     } catch (err) {
       toast("打开失败：" + (err && err.message ? err.message : err));
@@ -700,7 +738,8 @@
   cmd.save = async function (id) {
     const d = id ? docById(id) : activeDoc();
     if (!d) return;
-    if (d.kind !== "text") { toast(d.kind === "hex" ? "Hex 只读视图不能保存" : "大文本只读视图不能保存（请切换为文本编辑）"); return; }
+    // 统一文案：由能力表给出「<视图名>视图不支持保存/另存为」，各视图不再各写一句
+    if (!SN.caps.can("save", d)) { toast(SN.caps.reason("save", d)); return; }
     if (d.newFile || !d.handle) { return cmd.saveAs(d.id); }
     try {
       const bytes = encodeDocContent(d);
@@ -728,7 +767,7 @@
   cmd.saveAs = async function (id) {
     const d = id ? docById(id) : activeDoc();
     if (!d) return;
-    if (d.kind !== "text") { toast("只读视图不支持另存为；可用标签右键菜单导出原始文件"); return; }
+    if (!SN.caps.can("save", d)) { toast(SN.caps.reason("save", d) + "；可用标签右键菜单导出原始文件"); return; }
     let bytes;
     try { bytes = encodeDocContent(d); }
     catch (err) {
@@ -774,8 +813,8 @@
   function downloadDoc(id) {
     const d = docById(id);
     if (!d) return;
-    if (d.kind === "hex") { SN.download(d.name + ".hex", new Blob([d.raw])); return; }
-    if (d.kind === "big") { if (d.raw) SN.download(d.name, new Blob([d.raw])); else toast("未保留原始字节"); return; }
+    // 只读视图按适配器导回原始字节（Hex 存 .hex，大文本按原名）；可编辑文本走另存为
+    if (!SN.caps.can("edit", d)) { SN.views.of(d).exportBytes(d); return; }
     cmd.saveAs(id);
   }
 
@@ -830,12 +869,12 @@
     if (!s || !s.docs.length) return false;
     let any = false;
     for (const m of s.docs) {
-      // Hex / 大文本只读会话不保存正文，跳过恢复；老会话里的大文件副本也跳过
-      if (m.kind === "hex" || m.kind === "big" || m.tooBig || (m.size && m.size > 8 * 1024 * 1024)) continue;
+      // 只读视图（不走 persistBody 的）不保存正文，跳过恢复；老会话里的大文件副本也跳过
+      if (!SN.views.byKind(m.kind).persistBody || m.tooBig || (m.size && m.size > 8 * 1024 * 1024)) continue;
       const d = {
         id: m.id || SN.uid(), name: m.name || "恢复", path: m.path || "", kind: "text",
         enc: m.enc || "utf8", eol: m.eol || "lf", lang: m.lang || SN.detectLangByName(m.name) || "txt",
-        dirty: !!m.dirty, content: m.content || "", readOnly: m.kind === "big" || false
+        dirty: !!m.dirty, content: m.content || "", readOnly: !!m.readOnly
       };
       addDoc(d);
       any = true;
@@ -848,8 +887,8 @@
 
   // ============ 结果面板 ============
   // 生成「可折叠的结果分组」：单击文件名标题即折叠/展开该文件的结果。
-  // 普通文档的跨文档查找（app2.js showResults）与大文件单文件搜索（bigtext.js showBigResults）
-  // 共用这一套结构，所以折叠行为不区分大文件/小文件；调用方把结果行 append 到返回的 body 上即可。
+  // 所有查找结果（当前文件 / 所有打开文件，普通文档 / 大文件分块检索）都渲染进这套结构，
+  // 所以折叠行为不区分来源；调用方把结果行 append 到返回的 body 上即可。
   function resultGroup(file, count, opts) {
     const label = (opts && opts.label) || (file + "（" + count + "）");
     const group = el("div", { class: "res-group" });
@@ -908,9 +947,14 @@
     const foot = el("div", { class: "dfoot" });
     if (opts.buttons) {
       for (const b of opts.buttons) {
-        const bn = el("button", { text: b.label });
+        const bn = el("button", { text: b.label, title: b.title || null });
         if (b.primary) bn.style.background = "var(--accent)";
-        bn.addEventListener("click", () => { const r = b.action(); if (r !== false) closeModal(); });
+        if (b.disabled) {
+          // 禁用态：不接执行，保留 title 说明原因
+          bn.disabled = true;
+        } else {
+          bn.addEventListener("click", () => { const r = b.action(); if (r !== false) closeModal(); });
+        }
         foot.appendChild(bn);
       }
     }
@@ -951,13 +995,13 @@
   // ============ 简单的编辑命令入口（具体由 app2 补全） ============
   function edCmd(name) {
     const ed = activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("undo", activeDoc())); return; }
     if (name === "undo") ed.undo();
     else if (name === "redo") ed.redo();
   }
   function execNative(cmdName) {
     const ed = activeEditor();
-    if (!ed) { return; }
+    if (!ed) { setMsg(SN.caps.reason("clipboard", activeDoc())); return; }
     ed.ta.focus();
     document.execCommand(cmdName);
     if (cmdName === "cut" || cmdName === "paste") {
@@ -988,7 +1032,9 @@
 
     SN.$("#eolSel").addEventListener("change", (e) => {
       const d = activeDoc();
-      if (d && d.kind === "text") { d.eol = e.target.value; docContentTouched(d); setMsg("行尾格式将保存为 " + d.eol.toUpperCase()); }
+      if (!d) return;
+      if (!SN.caps.can("eolSwitch", d)) { setMsg(SN.caps.reason("eolSwitch", d)); return; }
+      d.eol = e.target.value; docContentTouched(d); setMsg("行尾格式将保存为 " + d.eol.toUpperCase());
     });
     SN.$("#fileInput").addEventListener("change", (e) => {
       if (e.target.files && e.target.files.length) handleOpenFiles(e.target.files);
