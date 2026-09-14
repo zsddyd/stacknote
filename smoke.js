@@ -730,6 +730,10 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     };
     assert(exists("icons/favicon.svg"), "icons/favicon.svg 存在");
     assert(exists("icons/apple-touch-icon.png"), "icons/apple-touch-icon.png 存在");
+    // 母版是大尺寸图标的唯一矢量源：丢了就只能重画（这条护栏是补上次它被误删的教训）
+    assert(exists("icons/stacknote-icon.svg"), "icons/stacknote-icon.svg 矢量母版存在");
+    assert(fs.readFileSync(path.join(__dirname, "icons/stacknote-icon.svg"), "utf8").indexOf("<svg") === 0,
+      "icons/stacknote-icon.svg 是 SVG 文件");
     assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.svg/.test(html), "index.html 引用 icons/favicon.svg");
     assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.ico/.test(html), "index.html 引用 icons/favicon.ico");
     assert(/<link[^>]+rel="apple-touch-icon"[^>]+icons\/apple-touch-icon\.png/.test(html), "index.html 引用 icons/apple-touch-icon.png");

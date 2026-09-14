@@ -95,6 +95,7 @@ icons/apple-touch-icon.png  iOS 主屏图标（180，满幅橙底）
 icons/icon-192.png     PWA 图标
 icons/icon-512.png     PWA 图标
 icons/icon-maskable-512.png  PWA maskable 图标（满幅橙底，内容收在 80% 安全圆内）
+icons/stacknote-icon.svg     图标矢量母版（大尺寸版的设计源，改完重新导出上面 4 个 PNG）
 css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
 js/util.js             基础工具/事件总线
 js/viewcaps.js         视图能力表（文本/大文本只读/Hex 各支持哪些功能，菜单与快捷键据此置灰）
@@ -122,10 +123,20 @@ js/app2.js             业务实现：查找/编辑操作/Hex/工具/插件/选�
 - `icons/favicon.svg` —— **小尺寸版**：去掉全部描边、元素加粗、层数减到两层，只留行号栏与三行代码。
   实测 16px 下仍能看出「叠放的两页 + 文本行」。
 - `icons/icon-192.png` / `icon-512.png` / `icon-maskable-512.png` / `apple-touch-icon.png`
-  —— **大尺寸版**：完整三层纸、行号方块、标题栏分隔线、行号栏竖线。
+  —— **大尺寸版**：完整三层纸、行号方块、标题栏分隔线、行号栏竖线。其矢量母版是
+  `icons/stacknote-icon.svg`（1024 坐标系），改颜色、比例或层数都改它。
 
-`icons/` 里 6 个文件都是直接可用的产物：只有 `favicon.svg` 是矢量源（可改可重导），大尺寸版由矢量
-母版导出、母版当前不在仓库中 —— 若需调整大尺寸版的细节，需先重建母版。
+`icons/` 里除矢量母版外的 6 个文件都是出货资产。重新导出（需要 `rsvg-convert` 与 ImageMagick）：
+
+```bash
+rsvg-convert -w 512 -h 512 icons/stacknote-icon.svg -o icons/icon-512.png
+rsvg-convert -w 192 -h 192 icons/stacknote-icon.svg -o icons/icon-192.png
+rsvg-convert -w 16 -h 16 icons/favicon.svg -o /tmp/f16.png    # 24/32/48 同理
+magick /tmp/f16.png /tmp/f32.png /tmp/f48.png icons/favicon.ico
+```
+
+maskable 与 apple-touch 需要在满幅橙底（`#FAAA3C`）上把母版缩到 74.9% / 82% 并居中，再合成导出
+——前者保证内容落在 80% 安全圆内，后者避免 iOS 上出现透明边。
 
 关于 `favicon.ico` 不在站点根目录：只要 `index.html` 里声明了 `<link rel="icon">`，浏览器就按声明取图，
 不会再去请求惯例路径 `/favicon.ico` —— 实测 Chrome 149：页面加载全程**未**请求根目录 `/favicon.ico`，
