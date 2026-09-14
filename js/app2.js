@@ -584,7 +584,8 @@
     const groups = {};
     for (const r of res) (groups[r.file] = groups[r.file] || []).push(r);
     for (const file of Object.keys(groups)) {
-      view.appendChild(el("div", { class: "res-sec", text: file + "（" + groups[file].length + "）" }));
+      // 一个文件一组：单击文件名可折叠该文件的结果（与大文件搜索共用同一结构）
+      const g = SN.resultGroup(file, groups[file].length);
       for (const r of groups[file]) {
         const row = el("div", { class: "res-row" });
         row.appendChild(el("span", { class: "lnn", text: "行 " + r.line + ":" }));
@@ -608,8 +609,9 @@
             ed.focus();
           }
         });
-        view.appendChild(row);
+        g.body.appendChild(row);
       }
+      view.appendChild(g.group);
     }
   }
   cmd.copyResultDock = function () {

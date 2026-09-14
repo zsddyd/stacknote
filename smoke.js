@@ -56,6 +56,13 @@ function makeNode(tag) {
     get firstChild() { return this.children[0] || null; }
   };
   Object.defineProperty(node, "parent", { get() { return node._parent; }, set(v) { node._parent = v; } });
+  // 与浏览器一致：把 textContent 设为 "" 会清空子节点。
+  // 不少代码靠 `container.textContent = ""` 清空后重建列表（结果面板/停靠窗），
+  // 桩若只记属性不清子节点，跨次渲染会累积出陈旧节点、断言随之失真。
+  Object.defineProperty(node, "textContent", {
+    get() { return node._text || ""; },
+    set(v) { node._text = v == null ? "" : String(v); if (node._text === "") node.children.length = 0; }
+  });
   node.appendChild = (function (orig) {
     return function (c) { if (c) { c._parent = this; } return orig.call(this, c); };
   })(node.appendChild);
@@ -95,6 +102,7 @@ const globals = {
   cancelAnimationFrame: (id) => clearTimeout(id),
   confirm: () => false,
   prompt: () => "0",
+  performance: { now: () => Date.now() },
   TextEncoder,
   TextDecoder,
   crypto: require("crypto").webcrypto,
@@ -348,9 +356,34 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     await runAll.handlers.click[0]();
     const secs = byClass(documentStub.querySelector("#resultView"), "res-sec").map(n => n.textContent);
     assert(secs.length === 2, "两个大文件都参与检索，实际=" + secs.join(" / "));
-    assert(secs.indexOf("a.log（2）") >= 0, "a.log 命中 2 处，实际=" + secs.join(" / "));
-    assert(secs.indexOf("b.log（1）") >= 0, "b.log 命中 1 处，实际=" + secs.join(" / "));
+    const secText = secs.join(" / ");
+    assert(secText.indexOf("a.log（2）") >= 0, "a.log 命中 2 处，实际=" + secText);
+    assert(secText.indexOf("b.log（1）") >= 0, "b.log 命中 1 处，实际=" + secText);
     SN.closeModal();
+
+    // 结果按文件分组，单击文件名标题可折叠/展开该文件的结果（需求：不区分大文件/小文件）
+    {
+      const view = documentStub.querySelector("#resultView");
+      const groups = byClass(view, "res-group");
+      assert(groups.length === 2, "结果按文件分组，组数=" + groups.length);
+      const headA = byClass(groups[0], "res-sec")[0];
+      const rowsA = byClass(groups[0], "res-row").length;
+      assert(headA && headA.handlers && headA.handlers.click, "文件名标题可点击");
+      assert(rowsA === 2, "分组内含该文件全部结果行，实际=" + rowsA);
+      assert(headA.textContent.indexOf("▾ ") === 0, "默认展开并带折叠标记，实际=" + headA.textContent);
+      headA.handlers.click[0]();
+      assert(groups[0].classList.contains("collapsed"), "单击文件名后该文件结果折叠");
+      assert(headA.textContent.indexOf("▸ ") === 0, "折叠后标记变为 ▸，实际=" + headA.textContent);
+      assert(byClass(groups[0], "res-row").length === rowsA, "折叠只隐藏不删节点（复制结果不受影响）");
+      assert(!groups[1].classList.contains("collapsed"), "只折叠被点的那一组，其它文件保持展开");
+      headA.handlers.click[0]();
+      assert(!groups[0].classList.contains("collapsed"), "再次单击展开");
+      // 键盘可达：Enter / 空格 同样切换
+      headA.handlers.keydown[0]({ key: "Enter", preventDefault() { } });
+      assert(groups[0].classList.contains("collapsed"), "Enter 键同样可折叠");
+      headA.handlers.keydown[0]({ key: " ", preventDefault() { } });
+      assert(!groups[0].classList.contains("collapsed"), "空格键展开");
+    }
 
     // 点击大文件的结果行应跳到对应行（走 _bigJump），而不是要求编辑器存在
     const rowB = byClass(documentStub.querySelector("#resultView"), "res-row").filter(r => r.dataset.doc === "bigB")[0];
@@ -371,6 +404,27 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     SN.dlg.find("find");
     assert(calledFind === 1, "Ctrl+F 在大文件上仍走本文件分块搜索");
     b1.bigFind = b1Find;
+
+    // 大文件单文件搜索（bigtext 分块检索 → showBigResults）也必须落到同一套可折叠分组
+    SN.app.activeId = b1.id;
+    const pBig = b1.bigFind();               // 打开关键字对话框
+    await new Promise(r => setTimeout(r, 0));
+    documentStub.querySelector("#bigFindKw").value = "needle";
+    const searchBtn = clickableByText(documentStub.querySelector("#modalHost"), "搜索");
+    assert(searchBtn, "大文件查找对话框有“搜索”按钮");
+    searchBtn.handlers.click[0]();
+    await pBig;
+    const bigView = documentStub.querySelector("#resultView");
+    const bigGroups = byClass(bigView, "res-group");
+    const bigRows = byClass(bigView, "res-row");
+    assert(bigGroups.length === 1, "大文件单文件搜索出一组结果，组数=" + bigGroups.length);
+    assert(bigRows.length === 2, "大文件结果行数=" + bigRows.length);
+    const bigHead = byClass(bigView, "res-sec")[0];
+    assert(bigHead.textContent.indexOf("已全部列出 2 条") >= 0, "标题保留原命中统计，实际=" + bigHead.textContent);
+    bigHead.handlers.click[0]();
+    assert(bigGroups[0].classList.contains("collapsed"), "大文件单文件结果同样可折叠");
+    bigHead.handlers.click[0]();
+    assert(!bigGroups[0].classList.contains("collapsed"), "大文件结果再次单击可展开");
   }
 
   console.log("SMOKE OK, docs =", SN.app.docs.length,

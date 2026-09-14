@@ -149,7 +149,9 @@ label{user-select:none}
   border-top:1px solid var(--border);position:relative;z-index:3}
 #dockSplit.dock-split:hover,#dockSplit.dock-split.dragging{background:var(--btn-hover-a)}
 #resultView{flex:1;overflow:auto;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12.5px}
-.res-sec{font-weight:bold;padding:4px 6px;background:var(--panel);border-bottom:1px solid var(--border)}
+.res-sec{font-weight:bold;padding:4px 6px;background:var(--panel);border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.res-sec:hover{background:var(--btn-hover-a)}
+.res-group.collapsed .res-body{display:none}
 .res-row{padding:1px 6px;cursor:pointer;white-space:pre}
 .res-row:hover{background:var(--btn-hover-a)}
 .res-row .lnn{color:var(--text-weak);margin-right:8px}

@@ -846,6 +846,35 @@
     return any;
   }
 
+  // ============ 结果面板 ============
+  // 生成「可折叠的结果分组」：单击文件名标题即折叠/展开该文件的结果。
+  // 普通文档的跨文档查找（app2.js showResults）与大文件单文件搜索（bigtext.js showBigResults）
+  // 共用这一套结构，所以折叠行为不区分大文件/小文件；调用方把结果行 append 到返回的 body 上即可。
+  function resultGroup(file, count, opts) {
+    const label = (opts && opts.label) || (file + "（" + count + "）");
+    const group = el("div", { class: "res-group" });
+    const head = el("div", { class: "res-sec" });
+    head.setAttribute("role", "button");
+    head.setAttribute("tabindex", "0");
+    head.title = "单击折叠/展开该文件的结果";
+    const body = el("div", { class: "res-body" });
+    // 折叠只切 class（隐藏），不删节点：正文仍在 DOM 里，复制结果不受影响
+    const paint = (collapsed) => {
+      group.classList.toggle("collapsed", collapsed);
+      head.textContent = (collapsed ? "▸ " : "▾ ") + label;
+    };
+    const toggle = () => paint(!group.classList.contains("collapsed"));
+    head.addEventListener("click", toggle);
+    head.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    });
+    paint(false);
+    group.appendChild(head);
+    group.appendChild(body);
+    return { group, head, body, toggle };
+  }
+  SN.resultGroup = resultGroup;
+
   // ============ 全局快捷键 ============
   function bindShortcuts() {
     document.addEventListener("keydown", (e) => {

@@ -157,7 +157,11 @@
     const view = SN.$("#resultView");
     if (!view) return;
     view.textContent = "";
-    view.appendChild(el("div", { class: "res-sec", text: doc.name + "（“" + kw + "”共 " + total + " 处，已全部列出 " + rows.length + " 条）" }));
+    // 与普通文档共用可折叠分组：单击标题折叠该文件的结果
+    const g = SN.resultGroup(doc.name, rows.length, {
+      label: doc.name + "（“" + kw + "”共 " + total + " 处，已全部列出 " + rows.length + " 条）"
+    });
+    view.appendChild(g.group);
     // 分批渲染全部结果，避免一次性建大量 DOM 卡顿
     const BATCH = 3000;
     let cursor = 0;
@@ -175,7 +179,7 @@
         });
         frag.appendChild(row);
       }
-      view.appendChild(frag);
+      g.body.appendChild(frag);
       if (cursor < rows.length) requestAnimationFrame(feed);
     }
     feed();
