@@ -671,7 +671,11 @@
     try {
       const bytes = await SN.readAsBytes(file);
       const size = file.size;
+      // 编码探测：大文件走采样（毫秒级），这里记录耗时与是否采样，便于真机诊断打开卡顿
+      const clock = (typeof performance !== "undefined" && performance.now) ? () => performance.now() : () => Date.now();
+      const tDetect = clock();
       const det = SN.detectEncode(bytes);
+      const detectMs = Math.round(clock() - tDetect);
       const hasNul = bytes.slice(0, Math.min(bytes.length, 4096)).some(b => b === 0);
       const bigLimit = Math.max(2, app.settings.bigThresholdMB || 2) * 1024 * 1024;
       const isBig = size > bigLimit;
@@ -681,7 +685,8 @@
       else if (isBig && !hasNul) kind = "big";               // 自动：大文本 -> 虚拟只读
       else if (hasNul && det.id !== "utf16le" && det.id !== "utf16be") kind = "hex";
       else if (isBig && (det.id === "utf16le" || det.id === "utf16be")) kind = "big";
-      console.info("[open]", file.name, "size="+size, "limit="+bigLimit, "mode="+mode, "kind="+kind, "hasNul="+hasNul, "enc="+det.id);
+      console.info("[open]", file.name, "size="+size, "limit="+bigLimit, "mode="+mode, "kind="+kind,
+        "hasNul="+hasNul, "enc="+det.id, "sampled="+!!det.sampled+"("+det.sampledBytes+"B)", "detect="+detectMs+"ms");
       // 视图类型判定到此为止（打开流程里唯一一次判定）；之后该视图怎么存、怎么解码都取自适配器
       const view = SN.views.byKind(kind);
 
