@@ -89,8 +89,10 @@ const globals = {
   navigator: { clipboard: { writeText: async () => { } } },
   localStorage: { getItem: () => null, setItem: () => { }, removeItem: () => { } },
   indexedDB: undefined,
-  requestAnimationFrame: () => 0,
-  cancelAnimationFrame: () => { },
+  // 真实回调（用 setTimeout 近似）：bigtext 的分块搜索靠双 rAF 让出主线程（allowPaint），
+  // 若 rAF 只返回 0 而不回调，搜索在 Node 里会永久挂起，这类问题就被掩盖了
+  requestAnimationFrame: (cb) => setTimeout(() => { if (typeof cb === "function") cb(Date.now()); }, 0),
+  cancelAnimationFrame: (id) => clearTimeout(id),
   confirm: () => false,
   prompt: () => "0",
   TextEncoder,
@@ -150,6 +152,16 @@ assert(SN.shortcuts.groups().length >= 4, "按键表按组呈现");
 // （旧实现里 Ctrl+Shift+F 被 Ctrl+F 吞掉、Ctrl+F2 被 F2 吞掉，都是因为没做这一步）
 const keyEv = (o) => Object.assign({ ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, key: "", preventDefault() { } }, o);
 const hitOf = (o) => { const it = SN.shortcuts.findEvent(keyEv(o)); return it ? it.id : null; };
+
+// DOM 桩遍历工具（桩只在 children 上建树，textContent 不会自动聚合子节点）
+const walkNodes = (n, fn) => { (n.children || []).forEach(c => { fn(c); walkNodes(c, fn); }); };
+const byClass = (root, cls) => { const out = []; walkNodes(root, n => { if (n.className === cls) out.push(n); }); return out; };
+const byText = (root, text) => { let hit = null; walkNodes(root, n => { if (!hit && n.textContent === text) hit = n; }); return hit; };
+const clickableByText = (root, text) => {
+  let hit = null;
+  walkNodes(root, n => { if (!hit && n.textContent === text && n.handlers && n.handlers.click) hit = n; });
+  return hit;
+};
 assert(hitOf({ ctrlKey: true, key: "f" }) === "find.open", "Ctrl+F → 查找");
 assert(hitOf({ ctrlKey: true, shiftKey: true, key: "F" }) === "find.openDocs", "Ctrl+Shift+F → 跨文档查找");
 assert(hitOf({ ctrlKey: true, shiftKey: true, key: "f" }) === "find.openDocs", "Ctrl+Shift+F 大小写无关");
@@ -253,14 +265,7 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
 
   // 菜单右侧的快捷键提示必须能在快捷键表里找到（防止菜单再写死一份按键串而跑偏）
   {
-    const accelTexts = [];
-    const walk = (n) => {
-      (n.children || []).forEach(c => {
-        if (c.className === "accel") accelTexts.push(c.textContent);
-        walk(c);
-      });
-    };
-    walk(documentStub.querySelector("#menubar"));
+    const accelTexts = byClass(documentStub.querySelector("#menubar"), "accel").map(n => n.textContent);
     const known = SN.shortcuts.items().map(it => it.accel);
     assert(accelTexts.length >= 15, "菜单渲染出快捷键提示，数量 = " + accelTexts.length);
     assert(accelTexts.every(t => known.indexOf(t) >= 0), "菜单提示均来自快捷键表：" + accelTexts.join(","));
@@ -286,11 +291,7 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
   {
     SN.dlg.shortcuts();
     const texts = [];
-    const walk = (n) => {
-      if (typeof n.textContent === "string" && n.textContent) texts.push(n.textContent);
-      (n.children || []).forEach(walk);
-    };
-    walk(documentStub.querySelector("#modalHost"));
+    walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
     const all = texts.join("|");
     assert(all.indexOf("快捷键一览") >= 0, "一览对话框已打开");
     assert(all.indexOf("Ctrl+Shift+F") >= 0 && all.indexOf("在打开的文档中查找…") >= 0, "一览对话框含跨文档查找条目");
@@ -318,6 +319,58 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     SN.shortcuts.resetOverrides();
     ed.undo = savedUndo;
     ed.redo = savedRedo;
+  }
+
+  // 回归：同时打开多个大文件时，Ctrl+Shift+F 必须仍是「跨文档查找」
+  // （大文件没有编辑器，dlg.find 原先在无编辑器时无视 mode，直接把 Ctrl+Shift+F 降级为当前文件查找）
+  {
+    const makeBig = (id, name, text) => {
+      const doc = { id, name, kind: "big", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new TextEncoder().encode(text) };
+      SN.app.docs.push(doc);
+      SN.buildBigTextPage(doc);
+      return doc;
+    };
+    const b1 = makeBig("bigA", "a.log", "alpha needle\nbeta line\nneedle two\n");
+    const b2 = makeBig("bigB", "b.log", "gamma\nneedle three\n");
+    await new Promise(r => setTimeout(r, 20));
+    SN.app.activeId = b1.id;
+    assert(SN.activeEditor() === null, "大文件没有编辑器（复现前提）");
+
+    SN.app.findOpt.keyword = "needle";
+    SN.dlg.find("opendocs");
+    const modal = documentStub.querySelector("#modalHost");
+    assert(byText(modal, "在打开的文档中查找"), "当前是大文件时仍打开「在打开的文档中查找」");
+    const runAll = clickableByText(modal, "在所有文档查找");
+    assert(runAll, "对话框提供「在所有文档查找」按钮");
+    assert(!clickableByText(modal, "查找下一个"), "无编辑器时不提供逐条跳转按钮");
+    // 桩里 el() 建的输入框不在 registry 上，这里给桩节点补上关键字
+    documentStub.querySelector("#findKey").value = "needle";
+    await runAll.handlers.click[0]();
+    const secs = byClass(documentStub.querySelector("#resultView"), "res-sec").map(n => n.textContent);
+    assert(secs.length === 2, "两个大文件都参与检索，实际=" + secs.join(" / "));
+    assert(secs.indexOf("a.log（2）") >= 0, "a.log 命中 2 处，实际=" + secs.join(" / "));
+    assert(secs.indexOf("b.log（1）") >= 0, "b.log 命中 1 处，实际=" + secs.join(" / "));
+    SN.closeModal();
+
+    // 点击大文件的结果行应跳到对应行（走 _bigJump），而不是要求编辑器存在
+    const rowB = byClass(documentStub.querySelector("#resultView"), "res-row").filter(r => r.dataset.doc === "bigB")[0];
+    assert(rowB, "结果行带 docId（bigB）");
+    const jumped = [];
+    b2._bigJump = (line) => jumped.push(line);
+    const savedActivate = SN.activateDoc;
+    SN.activateDoc = (id) => { SN.app.activeId = id; };
+    rowB.handlers.click[0]();
+    SN.activateDoc = savedActivate;
+    assert(jumped.join(",") === "2", "点击结果跳到大文件第 2 行，实际=" + jumped.join(","));
+
+    // 当前文档查找仍走该大文件自己的分块搜索（Ctrl+F 行为不变）
+    const b1Find = b1.bigFind;
+    let calledFind = 0;
+    b1.bigFind = () => { calledFind++; };
+    SN.app.activeId = b1.id;
+    SN.dlg.find("find");
+    assert(calledFind === 1, "Ctrl+F 在大文件上仍走本文件分块搜索");
+    b1.bigFind = b1Find;
   }
 
   console.log("SMOKE OK, docs =", SN.app.docs.length,

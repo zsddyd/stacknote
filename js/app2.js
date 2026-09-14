@@ -427,15 +427,20 @@
   // ============ 查找对话框 ============
   dlg.find = function (mode) {
     const ed = SN.activeEditor();
-    if (!ed) {
-      // 大文本虚拟只读视图没有编辑器：直接把 Ctrl+F/查找 接到分块搜索
-      const ad = SN.activeDoc();
-      if (ad && ad.kind === "big" && ad.bigFind) { ad.bigFind(); return; }
-      setMsg("没有活动文本文档"); return;
-    }
-    if (!app.findOpt.keyword && ed.hasSelection()) app.findOpt.keyword = ed.selectedText().slice(0, 200);
     const d = SN.activeDoc();
     const scope = mode === "opendocs" ? "docs" : "doc";
+    if (!ed) {
+      // 大文本虚拟只读视图没有编辑器（只读 + 虚拟滚动）：
+      //  · 当前文档查找 → 接到该文件的分块搜索（bigFind）
+      //  · 跨文档查找 → 仍要打开对话框，在所有打开文档（含大文件）里分块检索，
+      //    否则 Ctrl+Shift+F 会被降级成本文件查找（此前即如此）
+      if (scope === "doc") {
+        if (d && d.kind === "big" && d.bigFind) { d.bigFind(); return; }
+        setMsg(d && d.kind === "hex" ? "二进制(Hex)视图不支持查找，请切回文本标签" : "没有活动文本文档");
+        return;
+      }
+    }
+    if (ed && !app.findOpt.keyword && ed.hasSelection()) app.findOpt.keyword = ed.selectedText().slice(0, 200);
     const m = SN.openModal({
       title: scope === "docs" ? "在打开的文档中查找" : "查找 / 替换",
       width: "560px",
@@ -444,8 +449,11 @@
         rows.push(frow("关键字", textIn("findKey", app.findOpt.keyword)));
         rows.push(optrow([chk("caseOpt", "区分大小写", app.findOpt.case), chk("wholeOpt", "全词匹配", app.findOpt.whole), chk("reOpt", "正则", app.findOpt.regex)]));
         const btns = el("div", { class: "btn-group" });
-        mk(btns, "查找下一个", () => doFindNext(true));
-        mk(btns, "查找上一个", () => doFindNext(false));
+        // 无编辑器（大文件/二进制视图）时没有「当前光标」概念，逐条跳转不适用
+        if (ed) {
+          mk(btns, "查找下一个", () => doFindNext(true));
+          mk(btns, "查找上一个", () => doFindNext(false));
+        }
         mk(btns, scope === "docs" ? "在所有文档查找" : "全部查找(当前文档)", () => findAllAndShow(scope));
         if (scope === "doc") {
           mk(btns, "全部标记", () => { collectOpts(); cmd.markKeyword(); });
@@ -498,9 +506,11 @@
         async function findAllAndShow(sc) {
           collectOpts();
           const res = [];
-          const docList = sc === "docs" ? app.docs.filter(x => x.kind === "text") : [d];
+          // 跨文档查找覆盖所有打开的文本文档：普通文档直接查正文，
+          // 大文本(kind=big)必须走分块检索（正文未整篇解码，content 为空），二进制(hex)视图跳过
+          const docList = sc === "docs" ? app.docs.filter(x => x.kind === "text" || x.kind === "big") : [d];
           for (const dd of docList) {
-            const isHuge = (dd.content || "").length > 2 * 1024 * 1024;
+            const isHuge = dd.kind === "big" || (dd.content || "").length > 2 * 1024 * 1024;
             if (isHuge && SN.bigSearchFile) {
               let raw = dd.raw;
               if (!raw && dd.handle) {
@@ -585,7 +595,10 @@
         row.dataset.line = r.line;
         row.addEventListener("click", () => {
           SN.activateDoc(r.docId);
+          const ad = SN.activeDoc();
           const ed = SN.activeEditor();
+          // 大文本只读视图没有编辑器：用它的 _bigJump 跳到命中行
+          if (!ed && ad && ad.kind === "big" && ad._bigJump && r.line) { ad._bigJump(r.line); return; }
           if (ed) {
             if (r.start !== undefined && r.end !== undefined && r.start !== null) {
               ed._setTextWithSel(ed.text, r.start, r.end); ed.scrollToPos(r.start);
