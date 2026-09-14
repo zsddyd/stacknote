@@ -154,13 +154,13 @@
 
   // ============ 视图开关 ============
   function applyEditorView(d) {
-    if (!d || d.kind !== "text" || !d.editor) return;
+    if (!d || !d.editor || !SN.caps.can("view", d)) return;
     const ed = d.editor;
     ed.setWrap(app.settings.wrap);
     ed.setShowSpaces(app.settings.showSpaces);
     ed.setShowEol(app.settings.showEol);
   }
-  function viewForAll() { app.docs.forEach(d => { if (d.kind === "text") applyEditorView(d); }); }
+  function viewForAll() { app.docs.forEach(d => { if (SN.caps.can("view", d)) applyEditorView(d); }); }
 
   cmd.toggleWrap = function () {
     app.settings.wrap = !app.settings.wrap;
@@ -207,7 +207,7 @@
     const ul = $("#fileList");
     ul.textContent = "";
     for (const d of app.docs) {
-      const li = el("li", { "data-id": d.id, class: d.id === app.activeId ? "cur" : "", text: (d.dirty ? "* " : "") + d.name + (d.kind === "hex" ? " ⛭" : "") });
+      const li = el("li", { "data-id": d.id, class: d.id === app.activeId ? "cur" : "", text: (d.dirty ? "* " : "") + d.name + SN.views.of(d).listTag });
       li.addEventListener("click", () => SN.activateDoc(d.id));
       ul.appendChild(li);
     }
@@ -229,7 +229,8 @@
   }
   cmd.reloadWith = async function (code) {
     const d = SN.activeDoc();
-    if (!d || d.kind !== "text") return;
+    if (!d) return;
+    if (!SN.caps.can("encoding", d)) { setMsg(SN.caps.reason("encoding", d)); return; }
     let bytes;
     if (d.raw) bytes = d.raw;
     else if (d.handle) bytes = await SN.readAsBytes(await d.handle.getFile());
@@ -244,7 +245,8 @@
   };
   cmd.convertTo = function (code) {
     const d = SN.activeDoc();
-    if (!d || d.kind !== "text") return;
+    if (!d) return;
+    if (!SN.caps.can("encoding", d)) { setMsg(SN.caps.reason("encoding", d)); return; }
     if (!SN.codeById(code).writable) {
       setMsg("浏览器不支持写出 " + SN.codeById(code).name + "，请在「另存为」时改存 UTF-8/UTF-16");
       return;
@@ -257,9 +259,12 @@
   cmd.reloadAs = function (docId, kind) {
     const d = SN.docById(docId);
     if (!d) return;
-    if (kind === "text" && d.kind === "big") { setMsg("大文件不支持强制编辑模式，仅支持只读查看与搜索"); return; }
-    if (kind === "text") {
-      if (d.kind === "text") { setMsg("当前已是文本模式"); return; }
+    const target = kind;   // 目标视图类型（"text" / "hex"）
+    // 能否切回可编辑文本由能力表决定（大文本视图不支持，Hex 支持）：
+    // 大文件请用「文件 → 以文本模式打开…」重新打开，避免整篇解码卡顿
+    if (target === "text" && !SN.caps.can("reloadAsText", d)) { setMsg(SN.caps.reason("reloadAsText", d)); return; }
+    if (target === "text") {
+      if (SN.caps.can("edit", d)) { setMsg("当前已是文本模式"); return; }
       if (!d.raw) { setMsg("未保留原始字节，无法切回文本模式"); return; }
       const text = SN.decodeBytes(d.raw, d.enc);
       d.kind = "text";
@@ -267,44 +272,24 @@
       d.eol = SN.detectEol(text);
       d.raw = null;
       d.readOnly = false;
-      rebuildPageFor(d);
+      SN.rebuildDocPage(d);
       setMsg("已切换为文本编辑模式（大文件编辑可能较慢）");
-    } else if (kind === "hex") {
+    } else if (target === "hex") {
       const bytes = d.raw;
       if (!bytes) { setMsg("未保留原始字节，无法转 Hex 视图"); return; }
       d.kind = "hex";
-      rebuildPageFor(d);
+      SN.rebuildDocPage(d);
       setMsg("已切换为 Hex 只读视图");
     } else setMsg("不支持的视图类型");
   };
-  function rebuildPageFor(d) {
-    if (d.pageEl) d.pageEl.remove();
-    const page = el("div", { class: "page active" });
-    page.dataset.doc = d.id;
-    if (d.kind === "hex") {
-      page.appendChild(buildHexView(d));
-    } else if (d.kind === "big") {
-      if (SN.buildBigTextPage) page.appendChild(SN.buildBigTextPage(d));
-      else page.appendChild(el("div", { text: "大文本视图不可用", class: "hint" }));
-    } else {
-      const ed = new SN.Editor({
-        readOnly: d.readOnly,
-        wrap: app.settings.wrap,
-        showSpaces: app.settings.showSpaces,
-        showEol: app.settings.showEol,
-        langId: d.lang,
-        onChange: (text) => { d.content = text; SN.docContentTouched(d); },
-        onStatus: (info) => { const dd = SN.activeDoc(); if (dd && dd.id === d.id) $("#posLabel").textContent = "Ln:" + info.line + "  Col:" + info.col; },
-        onActive: () => SN.activateDoc(d.id)
-      });
-      ed.setText(d.content || "", [0, 0]);
-      d.editor = ed;
-      page.appendChild(ed.wrapEl);
-    }
-    SN.$("#editorZone").appendChild(page);
-    d.pageEl = page;
-    SN.activateDoc(d.id);
-  }
+  // Hex 视图适配器：渲染、导出原始字节、切回可编辑文本都由 app2.js 实现
+  SN.views.define("hex", {
+    tabTag: "⛭", listTag: " ⛭", modeTag: "HexReadOnly", persistBody: false,
+    // 二进制视图：不解码正文，保留原始字节，编码栏用 utf8 占位
+    open: { readOnly: true, keepRawBytes: true, decodeMode: "none", fallbackEnc: "utf8" },
+    render: (doc, page) => { page.appendChild(buildHexView(doc)); return true; },
+    exportBytes: (doc) => { SN.download(doc.name + ".hex", new Blob([doc.raw])); }
+  });
   function updateStatusLabel() {
     const d = SN.activeDoc();
     if (d) {
@@ -317,7 +302,8 @@
   const URL_RE = /(https?:\/\/|ftp:\/\/|www\.)[^\s<>"']+/gi;
   function applyWebHighlights() {
     app.docs.forEach(d => {
-      if (d.kind !== "text" || !d.editor) return;
+      // Web 地址高亮是编辑器渲染特性（与换行/空白同属 view 能力）
+      if (!d.editor || !SN.caps.can("view", d)) return;
       if (!app.settings.webAddrHighlight) { d.editor.setWebRanges([]); return; }
       const marks = [];
       let m;
@@ -358,26 +344,26 @@
   cmd.markSelected = function () {
     const d = SN.activeDoc();
     if (!d) { setMsg("没有活动文本文档"); return false; }
-    if (d.kind === "big") {
-      const kw = (d.bigSelected && d.bigSelected()) || "";
-      if (!kw) { setMsg("请先在大文件视图中选中要高亮的文本"); return false; }
-      if (/\r|\n/.test(kw) || kw.length > 4096) { setMsg("大文件标记仅支持单行内且较短的文本"); return false; }
-      if (!d.bigAddMark) { setMsg("大文件标记暂不可用"); return false; }
-      d.bigAddMark(kw, app.curMarkColor);
-      setMsg("已用颜色高亮 “" + kw + "”：滚动查看（“清除全部标记”可移除）");
+    // 各视图的标记方式不同（编辑器标记记录 / 大文件持久标记），由适配器实现；此处只做能力判断与转发
+    const ad = SN.views.of(d);
+    if (!ad.markSelection) { setMsg(SN.caps.reason("mark", d)); return false; }
+    return ad.markSelection(d, app.curMarkColor, app.findOpt);
+  };
+  // 文本视图的标记实现（编辑器提供多关键字标记记录）
+  SN.views.define("text", {
+    clearMarks: (d) => { if (d.editor) d.editor.clearPersistentMarks(); },
+    markSelection: (d, color, findOpt) => {
+      const ed = d.editor;
+      if (!ed) { setMsg("没有活动文本文档"); return false; }
+      let kw = ed.hasSelection() ? ed.selectedText().trim() : "";
+      if (!kw && findOpt && findOpt.keyword) kw = findOpt.keyword;
+      if (!kw) { setMsg("请先双击/选中要高亮的文本，或先输入查找关键字"); return false; }
+      const count = ed.upsertMarkRecord(kw, color, { case: false, whole: false, regex: false });
+      ed.focus();
+      setMsg("已用颜色高亮 “" + kw + "”：共 " + count + " 处（可继续选其它词/颜色叠加）");
       return true;
     }
-    const ed = SN.activeEditor();
-    if (!ed || d.kind !== "text") { setMsg("没有活动文本文档"); return false; }
-    let kw = ed.hasSelection() ? ed.selectedText().trim() : "";
-    if (!kw && app.findOpt.keyword) kw = app.findOpt.keyword;
-    if (!kw) { setMsg("请先双击/选中要高亮的文本，或先输入查找关键字"); return false; }
-    const opts = { case: false, whole: false, regex: false };
-    const count = ed.upsertMarkRecord(kw, app.curMarkColor, opts);
-    ed.focus();
-    setMsg("已用颜色高亮 “" + kw + "”：共 " + count + " 处（可继续选其它词/颜色叠加）");
-    return true;
-  };
+  });
   cmd.markAll = function () {
     const ok = cmd.markSelected();
     if (!ok) setMsg("全部标记：请先选中文本或先执行一次查找");
@@ -385,7 +371,7 @@
   // 查找面板内“全部标记”：以面板关键字为准（避免误用编辑器旧选区）
   cmd.markKeyword = function () {
     const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!d || !ed || d.kind !== "text") { setMsg("没有活动文本文档"); return false; }
+    if (!d || !ed) { setMsg(d ? SN.caps.reason("mark", d) : "没有活动文本文档"); return false; }
     const kw = app.findOpt.keyword;
     if (!kw) { setMsg("请输入要标记的关键字"); return false; }
     const count = ed.upsertMarkRecord(kw, app.curMarkColor, app.findOpt);
@@ -394,14 +380,14 @@
   };
   cmd.clearMarksAll = function () {
     app.docs.forEach(d => {
-      if (d.editor) d.editor.clearPersistentMarks();
-      else if (d.kind === "big" && d.bigClearMarks) d.bigClearMarks();
+      const ad = SN.views.of(d);
+      if (ad.clearMarks) ad.clearMarks(d);
     });
     setMsg("已清除全部标记");
   };
   cmd.wordHighlight = function (word) {
     const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("mark", d)); return; }
     if (!word) { const w = ed.wordAtSelection(); word = w; }
     if (!word) { setMsg("请选择要高亮的文本"); return; }
     const opts = { case: true, whole: true, regex: false };
@@ -412,11 +398,12 @@
 
   cmd.toggleBookmark = function () {
     const ed = SN.activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("bookmark", SN.activeDoc())); return; }
     ed.toggleBookmark(ed.curLine() - 1);
   };
   cmd.gotoBookmark = function (dir) {
     const ed = SN.activeEditor();
+    if (!ed) { setMsg(SN.caps.reason("bookmark", SN.activeDoc())); return; }
     if (ed && !ed.gotoBookmark(dir)) setMsg("没有书签");
   };
   cmd.clearBookmarks = function () {
@@ -431,12 +418,13 @@
     const scope = mode === "opendocs" ? "docs" : "doc";
     if (!ed) {
       // 大文本虚拟只读视图没有编辑器（只读 + 虚拟滚动）：
-      //  · 当前文档查找 → 接到该文件的分块搜索（bigFind）
+      //  · 当前文档查找 → 交给该视图适配器的 openFind（大文件即分块搜索）
       //  · 跨文档查找 → 仍要打开对话框，在所有打开文档（含大文件）里分块检索，
       //    否则 Ctrl+Shift+F 会被降级成本文件查找（此前即如此）
       if (scope === "doc") {
-        if (d && d.kind === "big" && d.bigFind) { d.bigFind(); return; }
-        setMsg(d && d.kind === "hex" ? "二进制(Hex)视图不支持查找，请切回文本标签" : "没有活动文本文档");
+        const ad = d ? SN.views.of(d) : null;
+        if (ad && ad.openFind) { ad.openFind(d); return; }
+        setMsg(d ? SN.caps.reason("find", d) : "没有活动文本文档");
         return;
       }
     }
@@ -506,27 +494,17 @@
         async function findAllAndShow(sc) {
           collectOpts();
           const res = [];
-          // 跨文档查找覆盖所有打开的文本文档：普通文档直接查正文，
-          // 大文本(kind=big)必须走分块检索（正文未整篇解码，content 为空），二进制(hex)视图跳过
-          const docList = sc === "docs" ? app.docs.filter(x => x.kind === "text" || x.kind === "big") : [d];
+          // 跨文档查找覆盖所有「支持查找」的文档（能力表判定，Hex 自动排除）
+          const docList = sc === "docs" ? app.docs.filter(x => SN.caps.can("find", x)) : [d];
           for (const dd of docList) {
-            const isHuge = dd.kind === "big" || (dd.content || "").length > 2 * 1024 * 1024;
-            if (isHuge && SN.bigSearchFile) {
-              let raw = dd.raw;
-              if (!raw && dd.handle) {
-                try {
-                  const f = await dd.handle.getFile();
-                  raw = await SN.readAsBytes(f);
-                } catch (e) { raw = null; }
-              }
-              // 无原始字节时用正文重新编码后分块检索（仅临时内存，检索完即释放）
-              if (!raw) raw = new TextEncoder().encode(dd.content || "");
-              const tmp = { raw, enc: "utf8" };
+            const ad = SN.views.of(dd);
+            // 大文本：正文未整篇解码，必须走适配器的分块流式检索（只占临时内存）
+            if (ad.search) {
               const msg = SN.$("#msgLabel");
-              const r = await SN.bigSearchFile(tmp, app.findOpt.keyword, (pct, n) => {
+              const rows = await ad.search(dd, app.findOpt.keyword, (pct, n) => {
                 if (msg) msg.textContent = "正在检索 " + dd.name + " " + pct + "% · 已找到 " + n + " 处";
-              }, { abort: false });
-              for (const row of r.rows) res.push({ docId: dd.id, file: dd.name, line: row.line, content: row.snippet });
+              });
+              for (const row of rows) res.push({ docId: dd.id, file: dd.name, line: row.line, content: row.snippet });
               continue;
             }
             const ms = findMatches(dd.content || "", app.findOpt.keyword, app.findOpt);
@@ -557,7 +535,7 @@
 
   function jumpFind(forward) {
     const ed = SN.activeEditor();
-    if (!ed) { setMsg("无活动文档"); return; }
+    if (!ed) { setMsg(SN.caps.reason("find", SN.activeDoc())); return; }
     if (!app.findOpt.keyword) { dlg.find("find"); return; }
     const ms = findMatches(ed.text, app.findOpt.keyword, app.findOpt);
     if (!ms.length) { setMsg("未找到：" + app.findOpt.keyword); return; }
@@ -598,8 +576,8 @@
           SN.activateDoc(r.docId);
           const ad = SN.activeDoc();
           const ed = SN.activeEditor();
-          // 大文本只读视图没有编辑器：用它的 _bigJump 跳到命中行
-          if (!ed && ad && ad.kind === "big" && ad._bigJump && r.line) { ad._bigJump(r.line); return; }
+          // 无编辑器（大文本只读）：交给该视图适配器定位到命中行
+          if (!ed && ad && r.line) { const view = SN.views.of(ad); if (view.jumpToLine) { view.jumpToLine(ad, r.line); return; } }
           if (ed) {
             if (r.start !== undefined && r.end !== undefined && r.start !== null) {
               ed._setTextWithSel(ed.text, r.start, r.end); ed.scrollToPos(r.start);
@@ -624,15 +602,16 @@
   dlg.gotoLine = function () {
     const ed = SN.activeEditor();
     if (!ed) {
-      // 大文本只读视图：Ctrl+G 走定位行模态
+      // 无编辑器（大文本只读）：Ctrl+G 走定位行模态，实际定位交给视图适配器
       const ad = SN.activeDoc();
-      if (ad && ad.kind === "big" && ad._bigJump) {
+      const view = ad ? SN.views.of(ad) : null;
+      if (ad && view && view.jumpToLine) {
         SN.openModal({
           title: "定位行（大文件）",
           buttons: [{
             label: "跳转", primary: true, action: () => {
               const n = parseInt($("#bigGotoLineNum").value, 10);
-              if (n > 0) { ad._bigJump(n); if (SN.activateDoc) SN.activateDoc(ad.id); }
+              if (n > 0) { view.jumpToLine(ad, n); if (SN.activateDoc) SN.activateDoc(ad.id); }
             }
           }, { label: "取消", action: () => { } }],
           onOpen(b) {
@@ -644,7 +623,7 @@
               if (ev.key === "Enter") {
                 ev.preventDefault();
                 const n = parseInt(i.value, 10);
-                if (n > 0) { ad._bigJump(n); if (SN.activateDoc) SN.activateDoc(ad.id); SN.closeModal(); }
+                if (n > 0) { view.jumpToLine(ad, n); if (SN.activateDoc) SN.activateDoc(ad.id); SN.closeModal(); }
               }
             });
           }
@@ -666,13 +645,14 @@
 
   dlg.rename = function (d) {
     if (!d) return;
+    const canRename = SN.caps.can("rename", d);
     SN.openModal({
-      title: "重命名" + (d.kind === "text" ? "" : "（Hex 视图不可改）"),
+      title: "重命名" + (canRename ? "" : "（" + SN.caps.label(d) + "视图不支持改名）"),
       buttons: [{
         label: "确定", primary: true, action: () => {
           const name = $("#rnName").value.trim();
           if (!name) return false;
-          if (d.kind === "hex") return false;
+          if (!canRename) { setMsg(SN.caps.reason("rename", d)); return false; }
           d.name = name;
           if (d.handle && d.handle.move) {
             d.handle.move(name).catch(() => {});
@@ -785,7 +765,7 @@
   // ================= 工具 =================
   tool.format = function (kind) {
     const ed = SN.activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("format", SN.activeDoc())); return; }
     const text = ed.selectedText() || ed.text;
     if (kind === "json") {
       try {
@@ -880,7 +860,7 @@
         const code = $("#batchCode").value;
         let n = 0;
         app.docs.forEach(d => {
-          if (d.kind !== "text") return;
+          if (!SN.caps.can("encoding", d)) return;
           if (!SN.codeById(code).writable) return;
           d.enc = code; n++;
         });
@@ -924,7 +904,7 @@
   function runPlugin(p) {
     try {
       const ed = SN.activeEditor();
-      if (!ed) { setMsg("没有活动文档"); return; }
+      if (!ed) { setMsg(SN.caps.reason("plugin", SN.activeDoc())); return; }
       let fn;
       if (p.code) fn = new Function("SN", "text", "return (" + p.code + ")(text);");
       const start = ed.selStart, end = ed.selEnd;
@@ -1063,6 +1043,37 @@
     });
   };
 
+  // ================= 视图能力表（关于 → 视图能力表…） =================
+  // 只读展示：三种视图对各功能的支持情况，与菜单/快捷键置灰同源（js/viewcaps.js）
+  dlg.caps = function () {
+    const kinds = ["text", "big", "hex"];
+    const cur = SN.caps.kindOf(SN.activeDoc());
+    SN.openModal({
+      title: "视图能力表",
+      width: "560px",
+      buttons: [{ label: "关闭", action: () => { } }],
+      onOpen(b) {
+        b.appendChild(el("div", { class: "hint", text: "三种视图支持哪些功能（只读展示）。菜单、工具栏与快捷键按本表置灰；当前视图：" + SN.caps.label(SN.activeDoc()) }));
+        const tbl = el("table", { class: "tbl captbl" });
+        const head = el("tr");
+        head.appendChild(el("th", { text: "功能" }));
+        kinds.forEach(k => head.appendChild(el("th", { text: SN.caps.MATRIX[k].label + (k === cur ? "（当前）" : "") })));
+        tbl.appendChild(head);
+        SN.caps.DISPLAY.forEach(([cap, name]) => {
+          const tr = el("tr");
+          tr.appendChild(el("td", { text: name }));
+          kinds.forEach(k => tr.appendChild(el("td", {
+            class: "capcell" + (SN.caps.can(cap, { kind: k }) ? " yes" : " no"),
+            text: SN.caps.can(cap, { kind: k }) ? "✓" : "—"
+          })));
+          tbl.appendChild(tr);
+        });
+        b.appendChild(tbl);
+        b.appendChild(el("div", { class: "hint", text: "✓ 支持　— 不支持　（定义见 js/viewcaps.js）" }));
+      }
+    });
+  };
+
   // ================= 选项 =================
   dlg.options = function () {
         let saveAllFn;
@@ -1171,7 +1182,7 @@ SN.openModal({
   // ================= 列块编辑 =================
   dlg.columnEdit = function () {
     const ed = SN.activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("columnEdit", SN.activeDoc())); return; }
     SN.openModal({
       title: "列块编辑",
       width: "620px",

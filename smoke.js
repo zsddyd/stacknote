@@ -286,6 +286,7 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     assert(accelTexts.length >= 15, "菜单渲染出快捷键提示，数量 = " + accelTexts.length);
     assert(accelTexts.every(t => known.indexOf(t) >= 0), "菜单提示均来自快捷键表：" + accelTexts.join(","));
     assert(accelTexts.indexOf("Ctrl+Shift+F") >= 0, "菜单提示含 Ctrl+Shift+F");
+    assert(byText(documentStub.querySelector("#menubar"), "视图能力表…"), "「关于」菜单下有视图能力表入口");
   }
 
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
@@ -480,6 +481,47 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
       assert(allText.indexOf("Ctrl+H（大文本只读视图不支持替换）") >= 0, "一览标注不可用的 Ctrl+H");
       assert(allText.indexOf("Ctrl+F（") < 0, "可用的 Ctrl+F 不加标注");
       SN.closeModal();
+
+      // 关于 → 视图能力表：只读展示，与能力矩阵/适配器同源
+      SN.dlg.caps();
+      const cm = documentStub.querySelector("#modalHost");
+      const capCells = byClass(cm, "capcell");
+      const capTexts = [];
+      walkNodes(cm, n => { if (n.textContent) capTexts.push(n.textContent); });
+      const capAll = capTexts.join("|");
+      assert(capAll.indexOf("视图能力表") >= 0, "能力表对话框已打开");
+      assert(capAll.indexOf("文本编辑") >= 0 && capAll.indexOf("大文本只读") >= 0 && capAll.indexOf("Hex 只读") >= 0, "三种视图列都在");
+      assert(capAll.indexOf("（当前）") >= 0, "标出当前视图列");
+      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("—") >= 0, "支持/不支持都有展示");
+      assert(capCells.length === SN.caps.DISPLAY.length * 3, "每项能力三列都有单元格，实际=" + capCells.length);
+      SN.closeModal();
+
+      // 展示行与能力矩阵必须完全一致（新增能力时不会漏展示、也不会展示不存在的项）
+      const shownCaps = SN.caps.DISPLAY.map(r => r[0]);
+      const matrixCaps = [];
+      Object.keys(SN.caps.MATRIX).forEach(k => SN.caps.MATRIX[k].caps.forEach(c => { if (matrixCaps.indexOf(c) < 0) matrixCaps.push(c); }));
+      assert(matrixCaps.every(c => shownCaps.indexOf(c) >= 0), "矩阵中的能力都有展示行，缺=" + matrixCaps.filter(c => shownCaps.indexOf(c) < 0).join(","));
+      assert(shownCaps.every(c => matrixCaps.indexOf(c) >= 0), "展示行都在矩阵中定义，多=" + shownCaps.filter(c => matrixCaps.indexOf(c) < 0).join(","));
+
+      // 三个视图适配器都注册了渲染器；打开默认值与会话策略都取自适配器
+      assert(!!SN.views.byKind("text").render && !!SN.views.byKind("big").render && !!SN.views.byKind("hex").render, "三种视图都注册了渲染器");
+      assert(SN.views.byKind("big").open.readOnly && SN.views.byKind("big").open.keepRawBytes && SN.views.byKind("big").open.decodeMode === "head", "大文本打开默认值来自适配器");
+      assert(SN.views.byKind("hex").open.decodeMode === "none" && SN.views.byKind("hex").open.fallbackEnc === "utf8", "Hex 打开默认值来自适配器");
+      assert(SN.views.byKind("text").open.decodeMode === "full" && SN.views.byKind("big").persistBody === false, "文本整篇解码、只读视图不持久化正文");
+      assert(SN.views.of(null).render === SN.views.byKind("text").render, "未知文档回退文本视图");
+      assert(!!SN.views.byKind("big").openFind && !!SN.views.byKind("big").search && !!SN.views.byKind("big").markSelection, "大文本适配器提供本视图查找/分块检索/标记");
+      assert(!!SN.views.byKind("hex").exportBytes && !!SN.views.byKind("text").jumpToLine && !!SN.views.byKind("text").markSelection, "Hex 导出与文本定位/标记均已注册");
+
+      // 收敛护栏：行为模块里不应再出现按视图类型的比较（一律走 SN.caps / SN.views）
+      const offenders = [];
+      ["js/app.js", "js/app2.js", "js/storage.js"].forEach(f => {
+        fs.readFileSync(path.join(__dirname, f), "utf8").split("\n").forEach((line, i) => {
+          const code = line.replace(/\/\/.*$/, "");
+          if (/\bkind\s*[!=]==?\s*"(big|hex|text)"/.test(code)) offenders.push(f + ":" + (i + 1) + " " + code.trim());
+        });
+      });
+      assert(offenders.length === 0, "行为代码不再按视图 kind 分叉：\n" + offenders.join("\n"));
+
       SN.app.activeId = d0.id;
       SN.refreshMenus();
     }

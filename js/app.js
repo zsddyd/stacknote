@@ -185,7 +185,8 @@
 
   function setActiveLang(langId) {
     const d = activeDoc();
-    if (!d || d.kind !== "text") return;
+    if (!d) return;
+    if (!SN.caps.can("lang", d)) { setMsg(SN.caps.reason("lang", d)); return; }
     d.lang = langId;
     const ed = d.editor;
     if (ed) ed.langId = langId;
@@ -272,7 +273,10 @@
         { label: "统计选中行/字数", requires: "statusPos", action: () => cmd.edStatus() }
       ]},
       { label: "插件", items: SN.pluginMenuItems().map(it => (it && it.action ? Object.assign({ requires: "plugin" }, it) : it)) },
-      { label: "关于", items: [{ label: "关于 StackNote", action: () => dlg.about() }] }
+      { label: "关于", items: [
+        { label: "关于 StackNote", action: () => dlg.about() },
+        { label: "视图能力表…", action: () => dlg.caps() }
+      ] }
     ];
     buildMenu(menus);
   }
@@ -309,7 +313,7 @@
       { label: "显示空白", checked: s.showSpaces, requires: "view", action: () => cmd.toggleSpaces() },
       { label: "显示行尾", checked: s.showEol, requires: "view", action: () => cmd.toggleEol() },
       "-",
-      { label: "高亮 Web 地址", checked: s.webAddrHighlight, action: () => cmd.toggleWeb() },
+      { label: "高亮 Web 地址", checked: s.webAddrHighlight, requires: "view", action: () => cmd.toggleWeb() },
       { label: "文件列表窗口", checked: !SN.$("#fileDock").classList.contains("hidden"), action: () => cmd.toggleFileDock() },
       { label: "工具栏", checked: !SN.$("#toolbar").classList.contains("hidden"), action: () => cmd.toggleToolbar() }
     ];
@@ -367,16 +371,11 @@
       stay: true, rebuild: true,
       action: () => {
         app.curMarkColor = c; app.settings.markColorIdx = i; saveSettings();
-        const ed = SN.activeEditor();
-        if (ed && ed.hasSelection() && ed.selectedText().trim() && SN.cmd.markSelected) {
-          SN.cmd.markSelected();
-        } else {
-          // 大文件视图没有 Editor：用最近在视图内选中的文本标记（连续换色即重新高亮）
-          const d = SN.activeDoc();
-          if (d && d.kind === "big" && d.bigSelected && d.bigSelected() && SN.cmd.markSelected) {
-            SN.cmd.markSelected();
-          }
-        }
+        // 是否有可标记的选中内容由视图适配器判断（编辑器选区 / 大文件视图内最近一次选中），
+        // 连续换色即用新颜色重新高亮
+        const d = SN.activeDoc();
+        const kw = d ? SN.views.of(d).selectionKeyword(d) : "";
+        if (kw && SN.cmd.markSelected) SN.cmd.markSelected();
       }
     }));
   }
@@ -450,7 +449,8 @@
     tab.dataset.id = doc.id;
     const title = el("span", { class: "ttitle", text: doc.name });
     const dirty = el("span", { class: "dirty" + (doc.dirty ? "" : " hidden"), text: "*" });
-    const mode = doc.kind === "hex" ? "⛭" : doc.kind === "big" ? "≫" : doc.readOnly ? "🔒" : "";
+    // 标签上的模式标记由视图适配器提供（Hex ⛭ / 大文本 ≫ / 只读文本 🔒）
+    const mode = SN.views.of(doc).tabTag || (doc.readOnly ? "🔒" : "");
     const x = el("span", { class: "tx", title: "关闭", text: "×" });
     tab.appendChild(dirty);
     tab.appendChild(title);
@@ -495,33 +495,54 @@
     showCtx(e.clientX, e.clientY, html);
   }
 
+  // 文本视图适配器：Editor 的构造依赖本文件内部回调（改动标记、状态栏、双击取词），故在此注册。
+  // 大文本/Hex 的渲染分别由 bigtext.js 与 app2.js 注册（它们拥有各自的视图实现）。
+  function renderTextPage(doc, page) {
+    const ed = new SN.Editor({
+      readOnly: doc.readOnly,
+      wrap: app.settings.wrap,
+      showSpaces: app.settings.showSpaces,
+      showEol: app.settings.showEol,
+      langId: doc.lang,
+      onChange: (text) => { onEditorChange(doc, text); },
+      onStatus: (info) => { onEditorStatus(doc, info); },
+      onWordDbl: (w) => { if (app.settings.wordDblHighlight) wordHighlight(w); },
+      onActive: () => activateDoc(doc.id)
+    });
+    ed.setText(doc.content || "");
+    doc.editor = ed;
+    page.appendChild(ed.wrapEl);
+    return true;
+  }
+  SN.views.define("text", {
+    render: renderTextPage,
+    jumpToLine: (doc, n) => { if (doc.editor) doc.editor.gotoLine(n); },
+    selectionKeyword: (doc) => (doc.editor && doc.editor.hasSelection() ? doc.editor.selectedText().trim() : "")
+  });
+
+  // 页面渲染统一入口：具体怎么做交给视图适配器，这里不再出现 if (doc.kind === ...)
+  function fillPage(doc, page) {
+    const ad = SN.views.of(doc);
+    if (ad.render && ad.render(doc, page)) return;
+    page.appendChild(el("div", { text: SN.caps.label(doc) + "视图不可用（对应模块未加载）", class: "hint" }));
+  }
   function buildPage(doc) {
     const page = el("div", { class: "page" + (doc.id === app.activeId ? " active" : "") });
     page.dataset.doc = doc.id;
-    if (doc.kind === "hex") {
-      page.appendChild(buildHexView(doc));
-    } else if (doc.kind === "big") {
-      if (SN.buildBigTextPage) page.appendChild(SN.buildBigTextPage(doc));
-      else { page.appendChild(el("div", { text: "大文本视图不可用（bigtext.js 未加载）", class: "hint" })); }
-    } else {
-      const ed = new SN.Editor({
-        readOnly: doc.readOnly || doc.kind === "big",
-        wrap: app.settings.wrap,
-        showSpaces: app.settings.showSpaces,
-        showEol: app.settings.showEol,
-        langId: doc.lang,
-        onChange: (text, editor) => { onEditorChange(doc, text); },
-        onStatus: (info) => onEditorStatus(doc, info),
-        onWordDbl: (w) => { if (app.settings.wordDblHighlight) wordHighlight(w); },
-        onActive: (ed) => activateDoc(doc.id)
-      });
-      ed.setText(doc.content || "");
-      doc.editor = ed;
-      page.appendChild(ed.wrapEl);
-    }
+    fillPage(doc, page);
     editorZone.appendChild(page);
     doc.pageEl = page;
   }
+  // 视图类型切换（文本/大文本/Hex）后重建页面
+  SN.rebuildDocPage = function (doc) {
+    if (doc.pageEl) doc.pageEl.remove();
+    const page = el("div", { class: "page" });
+    page.dataset.doc = doc.id;
+    fillPage(doc, page);
+    editorZone.appendChild(page);
+    doc.pageEl = page;
+    activateDoc(doc.id);
+  };
 
   function activateDoc(id, skipFocus) {
     const d = docById(id);
@@ -529,7 +550,7 @@
     app.activeId = id;
     SN.$$("#editorZone .page").forEach(p => p.classList.toggle("active", p.dataset.doc === id));
     updateTabNodes();
-    if (d.kind !== "hex" && d.editor && !skipFocus) d.editor.focus();
+    if (d.editor && !skipFocus) d.editor.focus();
     refreshMenus();
     updateStatus();
     if (SN.updateFileList) SN.updateFileList();
@@ -569,7 +590,7 @@
 
   function updateTitle() {
     const d = activeDoc();
-    const mode = d ? (d.kind === "hex" ? "HexReadOnly" : d.kind === "big" ? "BigTextRO" : d.readOnly ? "RO" : "") : "";
+    const mode = d ? (SN.views.of(d).modeTag || (d.readOnly ? "RO" : "")) : "";
     document.title = (d ? (d.dirty ? "*" : "") + d.name + (mode ? " [" + mode + "]" : "") + " - " : "") + "StackNote";
   }
 
@@ -662,42 +683,41 @@
       else if (hasNul && det.id !== "utf16le" && det.id !== "utf16be") kind = "hex";
       else if (isBig && (det.id === "utf16le" || det.id === "utf16be")) kind = "big";
       console.info("[open]", file.name, "size="+size, "limit="+bigLimit, "mode="+mode, "kind="+kind, "hasNul="+hasNul, "enc="+det.id);
+      // 视图类型判定到此为止（打开流程里唯一一次判定）；之后该视图怎么存、怎么解码都取自适配器
+      const view = SN.views.byKind(kind);
 
       const d = {
         id: SN.uid(),
         name: file.name,
         path: file.name,
         kind,
-        enc: kind === "hex" ? "utf8" : det.id,
+        enc: view.open.fallbackEnc || det.id,
         eol: "lf",
         lang: SN.detectLangByName(file.name),
         dirty: false,
-        readOnly: kind === "big",
+        readOnly: !!view.open.readOnly,
         handle: handle || null,
         size,
-        // 仅保留必要原始字节：hex/大文本必须；普通文本只在小文件时保留（用于“按编码重载”）
-        raw: kind === "hex" || kind === "big" ? bytes : (size <= 2 * 1024 * 1024 ? bytes : null)
+        // 仅保留必要原始字节：只读视图必须；普通文本只在小文件时保留（用于“按编码重载”）
+        raw: (view.open.keepRawBytes || size <= 2 * 1024 * 1024) ? bytes : null
       };
-      if (kind === "hex") {
+      if (view.open.decodeMode === "none") {
+        d.content = "";
+      } else if (view.open.decodeMode === "head") {
+        // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
+        const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
+        d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
         d.content = "";
       } else {
-        if (kind === "big") {
-          // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
-          const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
-          d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
-          d.content = "";
-        } else {
-          let text = SN.decodeBytes(bytes, d.enc);
-          d.eol = SN.detectEol(text);
-          d.content = SN.normalizeEol(text, "lf");
-        }
+        let text = SN.decodeBytes(bytes, d.enc);
+        d.eol = SN.detectEol(text);
+        d.content = SN.normalizeEol(text, "lf");
       }
       addDoc(d);
       activateDoc(d.id);
       if (handle) pushRecent({ name: d.name, handle });
       else pushRecent({ name: d.name });
-      setMsg("已打开 " + d.name + "（" + SN.fmtSize(size) + "，" + SN.codeById(d.enc).name +
-        (kind === "big" ? "，大文本只读/虚拟滚动模式" : "") + "）");
+      setMsg("已打开 " + d.name + "（" + SN.fmtSize(size) + "，" + SN.codeById(d.enc).name + view.open.note + "）");
       scheduleSaveSession();
     } catch (err) {
       toast("打开失败：" + (err && err.message ? err.message : err));
@@ -719,7 +739,8 @@
   cmd.save = async function (id) {
     const d = id ? docById(id) : activeDoc();
     if (!d) return;
-    if (d.kind !== "text") { toast(d.kind === "hex" ? "Hex 只读视图不能保存" : "大文本只读视图不能保存（请切换为文本编辑）"); return; }
+    // 统一文案：由能力表给出「<视图名>视图不支持保存/另存为」，各视图不再各写一句
+    if (!SN.caps.can("save", d)) { toast(SN.caps.reason("save", d)); return; }
     if (d.newFile || !d.handle) { return cmd.saveAs(d.id); }
     try {
       const bytes = encodeDocContent(d);
@@ -747,7 +768,7 @@
   cmd.saveAs = async function (id) {
     const d = id ? docById(id) : activeDoc();
     if (!d) return;
-    if (d.kind !== "text") { toast("只读视图不支持另存为；可用标签右键菜单导出原始文件"); return; }
+    if (!SN.caps.can("save", d)) { toast(SN.caps.reason("save", d) + "；可用标签右键菜单导出原始文件"); return; }
     let bytes;
     try { bytes = encodeDocContent(d); }
     catch (err) {
@@ -793,8 +814,8 @@
   function downloadDoc(id) {
     const d = docById(id);
     if (!d) return;
-    if (d.kind === "hex") { SN.download(d.name + ".hex", new Blob([d.raw])); return; }
-    if (d.kind === "big") { if (d.raw) SN.download(d.name, new Blob([d.raw])); else toast("未保留原始字节"); return; }
+    // 只读视图按适配器导回原始字节（Hex 存 .hex，大文本按原名）；可编辑文本走另存为
+    if (!SN.caps.can("edit", d)) { SN.views.of(d).exportBytes(d); return; }
     cmd.saveAs(id);
   }
 
@@ -849,12 +870,12 @@
     if (!s || !s.docs.length) return false;
     let any = false;
     for (const m of s.docs) {
-      // Hex / 大文本只读会话不保存正文，跳过恢复；老会话里的大文件副本也跳过
-      if (m.kind === "hex" || m.kind === "big" || m.tooBig || (m.size && m.size > 8 * 1024 * 1024)) continue;
+      // 只读视图（不走 persistBody 的）不保存正文，跳过恢复；老会话里的大文件副本也跳过
+      if (!SN.views.byKind(m.kind).persistBody || m.tooBig || (m.size && m.size > 8 * 1024 * 1024)) continue;
       const d = {
         id: m.id || SN.uid(), name: m.name || "恢复", path: m.path || "", kind: "text",
         enc: m.enc || "utf8", eol: m.eol || "lf", lang: m.lang || SN.detectLangByName(m.name) || "txt",
-        dirty: !!m.dirty, content: m.content || "", readOnly: m.kind === "big" || false
+        dirty: !!m.dirty, content: m.content || "", readOnly: !!m.readOnly
       };
       addDoc(d);
       any = true;
@@ -975,13 +996,13 @@
   // ============ 简单的编辑命令入口（具体由 app2 补全） ============
   function edCmd(name) {
     const ed = activeEditor();
-    if (!ed) return;
+    if (!ed) { setMsg(SN.caps.reason("undo", activeDoc())); return; }
     if (name === "undo") ed.undo();
     else if (name === "redo") ed.redo();
   }
   function execNative(cmdName) {
     const ed = activeEditor();
-    if (!ed) { return; }
+    if (!ed) { setMsg(SN.caps.reason("clipboard", activeDoc())); return; }
     ed.ta.focus();
     document.execCommand(cmdName);
     if (cmdName === "cut" || cmdName === "paste") {
@@ -1012,7 +1033,9 @@
 
     SN.$("#eolSel").addEventListener("change", (e) => {
       const d = activeDoc();
-      if (d && d.kind === "text") { d.eol = e.target.value; docContentTouched(d); setMsg("行尾格式将保存为 " + d.eol.toUpperCase()); }
+      if (!d) return;
+      if (!SN.caps.can("eolSwitch", d)) { setMsg(SN.caps.reason("eolSwitch", d)); return; }
+      d.eol = e.target.value; docContentTouched(d); setMsg("行尾格式将保存为 " + d.eol.toUpperCase());
     });
     SN.$("#fileInput").addEventListener("change", (e) => {
       if (e.target.files && e.target.files.length) handleOpenFiles(e.target.files);

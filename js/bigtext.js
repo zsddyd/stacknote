@@ -539,4 +539,44 @@
     });
     return page;
   };
+
+  // 大文本视图适配器：把「大文件该怎么做」集中在这里（渲染/定位行/本视图查找/标记/导出/分块检索），
+  // 调用方只写 SN.views.of(doc).xxx()，不再四处 if (doc.kind === "big")
+  SN.views.define("big", {
+    tabTag: "≫", listTag: " ≫", modeTag: "BigTextRO", persistBody: false,
+    // 打开即只读；保留原始字节用于导出与分块检索；只解头部一小段判行尾，避免整篇解码
+    open: { readOnly: true, keepRawBytes: true, decodeMode: "head", note: "，大文本只读/虚拟滚动模式" },
+    render: (doc, page) => {
+      if (!SN.buildBigTextPage) return false;
+      page.appendChild(SN.buildBigTextPage(doc));
+      return true;
+    },
+    jumpToLine: (doc, n) => { if (doc._bigJump) doc._bigJump(n); },
+    openFind: (doc) => { if (doc.bigFind) doc.bigFind(); },
+    selectionKeyword: (doc) => (doc.bigSelected && doc.bigSelected()) || "",
+    clearMarks: (doc) => { if (doc.bigClearMarks) doc.bigClearMarks(); },
+    markSelection: (doc, color) => {
+      const kw = (doc.bigSelected && doc.bigSelected()) || "";
+      if (!kw) { SN.setMsg("请先在大文件视图中选中要高亮的文本"); return false; }
+      if (/\r|\n/.test(kw) || kw.length > 4096) { SN.setMsg("大文件标记仅支持单行内且较短的文本"); return false; }
+      if (!doc.bigAddMark) { SN.setMsg("大文件标记暂不可用"); return false; }
+      doc.bigAddMark(kw, color);
+      SN.setMsg("已用颜色高亮 “" + kw + "”：滚动查看（“清除全部标记”可移除）");
+      return true;
+    },
+    exportBytes: (doc) => {
+      if (doc.raw) SN.download(doc.name, new Blob([doc.raw]));
+      else SN.toast("未保留原始字节");
+    },
+    // 跨文档查找用：原始字节走分块流式检索，返回 [{line, snippet}]
+    search: async (doc, keyword, onProgress) => {
+      let raw = doc.raw;
+      if (!raw && doc.handle) {
+        try { raw = await SN.readAsBytes(await doc.handle.getFile()); } catch (e) { raw = null; }
+      }
+      if (!raw) raw = new TextEncoder().encode(doc.content || "");
+      const r = await chunkSearchFile({ raw, enc: doc.enc }, keyword, onProgress, { abort: false });
+      return r.rows;
+    }
+  });
 })();

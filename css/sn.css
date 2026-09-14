@@ -180,6 +180,9 @@ label{user-select:none}
 .dialog .dfoot{padding:8px 12px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border)}
 .dialog table.tbl{border-collapse:collapse;width:100%;font-size:12.5px}
 .dialog table.tbl td,.dialog table.tbl th{border:1px solid var(--border);padding:2px 6px;vertical-align:top}
+.dialog table.captbl td.capcell,.dialog table.captbl th+th{text-align:center;white-space:nowrap}
+.dialog table.captbl td.yes{color:var(--accent);font-weight:bold}
+.dialog table.captbl td.no{color:var(--text-weak)}
 .dialog h4{margin:10px 0 4px}
 .formrow{display:flex;align-items:center;gap:8px;margin:5px 0;flex-wrap:wrap}
 .formrow label{min-width:90px}
