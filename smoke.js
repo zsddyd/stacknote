@@ -717,6 +717,33 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     assert(!bigGroups[0].classList.contains("collapsed"), "大文件结果再次单击可展开");
   }
 
+    // ---- 静态图标资源一致性 ----
+    // 静态托管最常见的坑：manifest 引用了不存在的图标文件，本地看着没事、装上应用没图标。
+    // 这里把「html/manifest 声明」与「磁盘实际文件」对齐校验。
+    const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    const mf = JSON.parse(fs.readFileSync(path.join(__dirname, "manifest.webmanifest"), "utf8"));
+    const exists = (rel) => fs.existsSync(path.join(__dirname, rel));
+    const pngSize = (rel) => {
+      const b = fs.readFileSync(path.join(__dirname, rel));
+      assert(b.slice(1, 4).toString("latin1") === "PNG", rel + " 应是 PNG");
+      return [b.readUInt32BE(16), b.readUInt32BE(20)];
+    };
+    assert(exists("icons/favicon.svg"), "icons/favicon.svg 存在");
+    assert(exists("icons/apple-touch-icon.png"), "icons/apple-touch-icon.png 存在");
+    assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.svg/.test(html), "index.html 引用 icons/favicon.svg");
+    assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.ico/.test(html), "index.html 引用 icons/favicon.ico");
+    assert(/<link[^>]+rel="apple-touch-icon"[^>]+icons\/apple-touch-icon\.png/.test(html), "index.html 引用 icons/apple-touch-icon.png");
+    assert(Array.isArray(mf.icons) && mf.icons.length >= 3, "manifest 声明了 icons");
+    mf.icons.forEach(ic => {
+      assert(exists(ic.src), "manifest 图标文件存在：" + ic.src);
+      assert(ic.type === "image/png" && /^\d+x\d+$/.test(ic.sizes || ""), "manifest 图标声明 type/sizes：" + ic.src);
+      // 尺寸以声明为准，避免维护第二份硬编码清单
+      const [w, h] = pngSize(ic.src);
+      assert(ic.sizes === w + "x" + h, ic.src + " 实际尺寸与声明不符：声明 " + ic.sizes + "，实测 " + w + "x" + h);
+    });
+    assert(mf.icons.some(ic => String(ic.purpose).indexOf("maskable") >= 0), "manifest 含 maskable 图标");
+    assert(fs.readFileSync(path.join(__dirname, "icons/favicon.ico")).slice(0, 4).toString("hex") === "00000100", "icons/favicon.ico 文件头合法");
+
   console.log("SMOKE OK, docs =", SN.app.docs.length,
     "activeId =", SN.app.activeId,
     "names =", SN.app.docs.map(d => d.name).join(","),

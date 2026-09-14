@@ -89,6 +89,12 @@ node smoke.js
 ```text
 index.html             入口
 manifest.webmanifest   PWA manifest
+icons/favicon.svg      应用图标（SVG，小尺寸优化版：无描边、元素加粗，16px 可辨认）
+icons/favicon.ico      16/32/48 位图图标（旧浏览器 / 书签栏）
+icons/apple-touch-icon.png  iOS 主屏图标（180，满幅橙底）
+icons/icon-192.png     PWA 图标
+icons/icon-512.png     PWA 图标
+icons/icon-maskable-512.png  PWA maskable 图标（满幅橙底，内容收在 80% 安全圆内）
 css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
 js/util.js             基础工具/事件总线
 js/viewcaps.js         视图能力表（文本/大文本只读/Hex 各支持哪些功能，菜单与快捷键据此置灰）
@@ -104,6 +110,31 @@ js/textops.js          文本变换纯函数
 js/app.js              应用框架：菜单/工具栏/标签/文档/状态栏/对话框骨架
 js/app2.js             业务实现：查找/编辑操作/Hex/工具/插件/选项/启动
 ```
+
+## 应用图标
+
+画面主题是**三层叠放的编辑器页面**：浅蓝文档、白纸、橙色编辑面板，带标签页、行号方块、
+行号栏竖线与三行代码色块。配色严格取品牌值：`#FAAA3C`（主橙）/ `#FFFFFF` / `#C0DCF2`（浅蓝）
+/ `#26282C`（线条）。
+
+同一套设计语言下有**两套几何**，因为一套图形不可能同时照顾 16px 与 512px：
+
+- `icons/favicon.svg` —— **小尺寸版**：去掉全部描边、元素加粗、层数减到两层，只留行号栏与三行代码。
+  实测 16px 下仍能看出「叠放的两页 + 文本行」。
+- `icons/icon-192.png` / `icon-512.png` / `icon-maskable-512.png` / `apple-touch-icon.png`
+  —— **大尺寸版**：完整三层纸、行号方块、标题栏分隔线、行号栏竖线。
+
+`icons/` 里 6 个文件都是直接可用的产物：只有 `favicon.svg` 是矢量源（可改可重导），大尺寸版由矢量
+母版导出、母版当前不在仓库中 —— 若需调整大尺寸版的细节，需先重建母版。
+
+关于 `favicon.ico` 不在站点根目录：只要 `index.html` 里声明了 `<link rel="icon">`，浏览器就按声明取图，
+不会再去请求惯例路径 `/favicon.ico` —— 实测 Chrome 149：页面加载全程**未**请求根目录 `/favicon.ico`，
+只取了声明过的 `icons/` 路径。少数不解析 HTML 的抓取方（部分 RSS 阅读器、老式爬虫、个别 IM 的链接
+预览）会盲取 `/favicon.ico`，它们会拿到 404；如果在意这类边角场景，把 `favicon.ico` 复制一份回根目录
+即可，其它文件仍可留在 `icons/`。
+
+`smoke.js` 会校验 `index.html` / `manifest.webmanifest` 声明的图标在磁盘上确实存在、且 PNG 尺寸
+与声明一致 —— 清单引用缺失图标是静态托管最常见的坑（本地看着正常，装上应用却没有图标）。
 
 ## 部署到静态托管
 
