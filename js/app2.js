@@ -412,44 +412,58 @@
   };
 
   // ============ 查找对话框 ============
-  dlg.find = function (mode) {
+  // 统一查找入口：不再区分「查找…」与「在打开的文档中查找…」，
+  // 都在同一个对话框里输入关键字，再用两个按钮选择作用域：
+  //   当前文件中查找 / 查找所有打开文件
+  // opts: { scope: "doc"(默认) | "docs", replace: true 表示从「替换…」进入 }
+  dlg.find = function (opts) {
+    const o = typeof opts === "string" ? { scope: opts === "opendocs" ? "docs" : "doc" } : (opts || {});
     const ed = SN.activeEditor();
     const d = SN.activeDoc();
-    const scope = mode === "opendocs" ? "docs" : "doc";
-    if (!ed) {
-      // 大文本虚拟只读视图没有编辑器（只读 + 虚拟滚动）：
-      //  · 当前文档查找 → 交给该视图适配器的 openFind（大文件即分块搜索）
-      //  · 跨文档查找 → 仍要打开对话框，在所有打开文档（含大文件）里分块检索，
-      //    否则 Ctrl+Shift+F 会被降级成本文件查找（此前即如此）
-      if (scope === "doc") {
-        const ad = d ? SN.views.of(d) : null;
-        if (ad && ad.openFind) { ad.openFind(d); return; }
-        setMsg(d ? SN.caps.reason("find", d) : "没有活动文本文档");
-        return;
-      }
-    }
+    const scope = o.scope === "docs" ? "docs" : "doc";
+    const canFindHere = !!d && SN.caps.can("find", d);
     if (ed && !app.findOpt.keyword && ed.hasSelection()) app.findOpt.keyword = ed.selectedText().slice(0, 200);
     const m = SN.openModal({
-      title: scope === "docs" ? "在打开的文档中查找" : "查找 / 替换",
+      title: o.replace ? "查找 / 替换" : "查找",
       width: "560px",
       onOpen(body) {
         const rows = [];
         rows.push(frow("关键字", textIn("findKey", app.findOpt.keyword)));
-        rows.push(optrow([chk("caseOpt", "区分大小写", app.findOpt.case), chk("wholeOpt", "全词匹配", app.findOpt.whole), chk("reOpt", "正则", app.findOpt.regex)]));
-        const btns = el("div", { class: "btn-group" });
+        // 查找选项只对文本视图有效：大文件按分块流式检索（忽略大小写、不支持正则/全词），
+        // 此时改为一行说明，避免勾了却没效果的误导
+        if (ed) {
+          rows.push(optrow([chk("caseOpt", "区分大小写", app.findOpt.case), chk("wholeOpt", "全词匹配", app.findOpt.whole), chk("reOpt", "正则", app.findOpt.regex)]));
+        } else if (canFindHere) {
+          rows.push(el("div", { class: "hint", text: "当前视图按分块流式检索：忽略大小写，不支持正则/全词" }));
+        } else {
+          rows.push(el("div", { class: "hint", text: (d ? SN.caps.reason("find", d) : "没有活动文档") + "，仍可查找其它打开的文档" }));
+        }
+        // 主按钮：作用域二选一（当前文件 / 所有打开文件）
+        const scopeBtns = el("div", { class: "btn-group" });
+        mk(scopeBtns, "当前文件中查找", () => findAllAndShow("doc"), { primary: scope === "doc", disabled: !canFindHere, title: canFindHere ? "" : (d ? SN.caps.reason("find", d) : "没有活动文档") });
+        mk(scopeBtns, "查找所有打开文件", () => findAllAndShow("docs"), { primary: scope === "docs" });
+        // 次级按钮：仅文本视图（需要光标/可写）
+        const subBtns = el("div", { class: "btn-group" });
         // 无编辑器（大文件/二进制视图）时没有「当前光标」概念，逐条跳转不适用
         if (ed) {
-          mk(btns, "查找下一个", () => doFindNext(true));
-          mk(btns, "查找上一个", () => doFindNext(false));
+          mk(subBtns, "查找下一个", () => doFindNext(true));
+          mk(subBtns, "查找上一个", () => doFindNext(false));
+          mk(subBtns, "全部标记", () => { collectOpts(); cmd.markKeyword(); });
+          mk(subBtns, "替换全部", () => doReplaceAll());
         }
-        mk(btns, scope === "docs" ? "在所有文档查找" : "全部查找(当前文档)", () => findAllAndShow(scope));
-        if (scope === "doc") {
-          mk(btns, "全部标记", () => { collectOpts(); cmd.markKeyword(); });
-          mk(btns, "替换全部", () => doReplaceAll());
-        }
-        body.appendChild(fieldset("", rows, btns));
+        body.appendChild(fieldset("", rows, scopeBtns));
+        if (subBtns.children.length) body.appendChild(el("div", { class: "findrow", style: "margin-top:6px" }, [subBtns]));
         const kv = $("#findKey");
         kv.focus(); kv.select();
+        // 回车 = 执行主作用域（Ctrl+Shift+F 进来时默认就是「所有打开文件」）
+        kv.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          collectOpts();
+          if (scope === "docs") findAllAndShow("docs");
+          else if (canFindHere) findAllAndShow("doc");
+          else setMsg(d ? SN.caps.reason("find", d) : "没有活动文档");
+        });
         function frow(label, input) {
           const r = el("div", { class: "findrow" });
           r.appendChild(el("label", { text: label, style: "min-width:70px" }));
@@ -463,7 +477,14 @@
         }
         function chk(id, label, v) { return el("label", {}, [el("input", { type: "checkbox", id, checked: v }), " " + label]); }
         function textIn(id, v) { return el("input", { type: "text", id, value: v, style: "flex:1" }); }
-        function mk(cont, label, fn) { const b = el("button", { text: label }); b.addEventListener("click", fn); cont.appendChild(b); }
+        function mk(cont, label, fn, bopts) {
+          const b = el("button", { text: label, title: (bopts && bopts.title) || null });
+          const bo = bopts || {};
+          if (bo.primary) b.style.background = "var(--accent)";
+          if (bo.disabled) b.disabled = true;
+          else b.addEventListener("click", fn);
+          cont.appendChild(b);
+        }
         function fieldset(title, rws, bt) {
           const f = el("fieldset", { style: "border:1px solid var(--border);padding:8px;margin:0" });
           if (title) f.appendChild(el("legend", { text: title }));
@@ -516,7 +537,13 @@
             }
           }
           showResults(res, app.findOpt.keyword);
-          setMsg("共找到 " + res.length + " 处");
+          // 当前文件作用域下，若该视图没有光标（大文件只读），自动定位到第一处命中，
+          // 便于立即看到上下文；结果面板仍可点击跳到其它命中
+          if (sc === "doc" && !SN.activeEditor() && res.length) {
+            const ad = SN.views.of(d);
+            if (ad.jumpToLine) ad.jumpToLine(d, res[0].line);
+          }
+          setMsg("共找到 " + res.length + " 处（查找范围：" + (sc === "docs" ? "所有打开文件" : "当前文件") + "）");
         }
         function doReplaceAll() {
           collectOpts();
@@ -536,7 +563,7 @@
   function jumpFind(forward) {
     const ed = SN.activeEditor();
     if (!ed) { setMsg(SN.caps.reason("find", SN.activeDoc())); return; }
-    if (!app.findOpt.keyword) { dlg.find("find"); return; }
+    if (!app.findOpt.keyword) { dlg.find({ scope: "doc" }); return; }
     const ms = findMatches(ed.text, app.findOpt.keyword, app.findOpt);
     if (!ms.length) { setMsg("未找到：" + app.findOpt.keyword); return; }
     const caret = ed.caret();

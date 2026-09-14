@@ -31,11 +31,12 @@
     { id: "edit.columnEdit", group: "编辑", label: "列块编辑…", accel: "Alt+X", where: "global", requires: "columnEdit", run: () => SN.dlg.columnEdit() },
     { id: "line.dup", group: "编辑", label: "复制当前行", accel: "Ctrl+D", where: "global", requires: "edit", run: () => SN.cmd.lineOp("dup") },
 
-    { id: "find.open", group: "查找", label: "查找…", accel: "Ctrl+F", where: "global", requires: "find", run: () => SN.dlg.find("find") },
-    { id: "find.replace", group: "查找", label: "替换…", accel: "Ctrl+H", where: "global", requires: "replace", run: () => SN.dlg.find("replace") },
-    { id: "find.next", group: "查找", label: "查找下一个", accel: "F3", where: "global", requires: "find", run: () => SN.dlg.findNext() },
-    { id: "find.prev", group: "查找", label: "查找上一个", accel: "F4", where: "global", requires: "find", run: () => SN.dlg.findPrev() },
-    { id: "find.openDocs", group: "查找", label: "在打开的文档中查找…", accel: "Ctrl+Shift+F", where: "global", requires: "find", run: () => SN.dlg.find("opendocs") },
+    // 统一查找对话框本身在所有视图都可用（作用域按钮会按能力禁用），故不设 requires
+    { id: "find.open", group: "查找", label: "查找…", accel: "Ctrl+F", where: "global", run: () => SN.dlg.find({ scope: "doc" }) },
+    { id: "find.openDocs", group: "查找", label: "查找…（默认查所有打开文件）", accel: "Ctrl+Shift+F", where: "global", run: () => SN.dlg.find({ scope: "docs" }) },
+    { id: "find.replace", group: "查找", label: "替换…", accel: "Ctrl+H", where: "global", requires: "replace", run: () => SN.dlg.find({ scope: "doc", replace: true }) },
+    { id: "find.next", group: "查找", label: "查找下一个", accel: "F3", where: "global", requires: "findStep", run: () => SN.dlg.findNext() },
+    { id: "find.prev", group: "查找", label: "查找上一个", accel: "F4", where: "global", requires: "findStep", run: () => SN.dlg.findPrev() },
 
     { id: "bookmark.toggle", group: "书签", label: "设置/移除书签", accel: "Ctrl+F2", where: "global", requires: "bookmark", run: () => SN.cmd.toggleBookmark() },
     { id: "bookmark.next", group: "书签", label: "下一个书签", accel: "F2", where: "global", requires: "bookmark", run: () => SN.cmd.gotoBookmark(1) },

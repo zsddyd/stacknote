@@ -290,11 +290,10 @@
   }
   function findMenuItems() {
     return [
-      { label: "查找…", sc: "find.open", requires: "find" },
+      { label: "查找…", sc: "find.open" },
       { label: "替换…", sc: "find.replace", requires: "replace" },
-      { label: "查找下一个", sc: "find.next", requires: "find" },
-      { label: "查找上一个", sc: "find.prev", requires: "find" },
-      { label: "在打开的文档中查找…", sc: "find.openDocs", requires: "find" },
+      { label: "查找下一个", sc: "find.next", requires: "findStep" },
+      { label: "查找上一个", sc: "find.prev", requires: "findStep" },
       "-",
       { label: "全部标记(Mark All)", action: () => cmd.markAll() },
       { label: "清除全部标记", action: () => cmd.clearMarksAll() },
@@ -396,8 +395,8 @@
     undo: { t: "撤销", g: "↺", requires: "undo", a: () => edCmd("undo") },
     redo: { t: "重做", g: "↻", requires: "undo", a: () => edCmd("redo") },
     sep3: "-",
-    find: { t: "查找", g: "🔍", requires: "find", a: () => dlg.find("find") },
-    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find("replace") },
+    find: { t: "查找", g: "🔍", a: () => dlg.find({ scope: "doc" }) },
+    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find({ scope: "doc", replace: true }) },
     mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",
@@ -888,8 +887,8 @@
 
   // ============ 结果面板 ============
   // 生成「可折叠的结果分组」：单击文件名标题即折叠/展开该文件的结果。
-  // 普通文档的跨文档查找（app2.js showResults）与大文件单文件搜索（bigtext.js showBigResults）
-  // 共用这一套结构，所以折叠行为不区分大文件/小文件；调用方把结果行 append 到返回的 body 上即可。
+  // 所有查找结果（当前文件 / 所有打开文件，普通文档 / 大文件分块检索）都渲染进这套结构，
+  // 所以折叠行为不区分来源；调用方把结果行 append 到返回的 body 上即可。
   function resultGroup(file, count, opts) {
     const label = (opts && opts.label) || (file + "（" + count + "）");
     const group = el("div", { class: "res-group" });
