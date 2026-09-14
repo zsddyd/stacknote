@@ -1114,22 +1114,27 @@ SN.openModal({
   };
 
   dlg.shortcuts = function () {
-    const rows = [
-      ["新建", "Ctrl+T"], ["打开", "Ctrl+O"], ["保存", "Ctrl+S"], ["另存为", "Ctrl+Shift+S"],
-      ["关闭标签", "Ctrl+W"], ["查找", "Ctrl+F"], ["替换", "Ctrl+H"], ["目录/打开文档查找", "Ctrl+Shift+F"],
-      ["下一个查找", "F3"], ["上一个查找", "F4"], ["跳转行", "Ctrl+G"], ["下一个书签", "F2"],
-      ["上一个书签", "Shift+F2"], ["设置书签", "Ctrl+F2"], ["全选", "Ctrl+A"], ["撤销/重做", "Ctrl+Z / Ctrl+Y"],
-      ["复制当前行", "Ctrl+D"], ["放大/缩小", "工具栏 ＋/－"]
-    ];
     SN.openModal({
       title: "快捷键一览",
       buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
-        const tbl = el("table", { class: "tbl" });
-        const tr0 = el("tr"); tr0.appendChild(el("th", { text: "功能" })); tr0.appendChild(el("th", { text: "快捷键" })); tbl.appendChild(tr0);
-        rows.forEach(r => { const tr = el("tr"); tr.appendChild(el("td", { text: r[0] })); tr.appendChild(el("td", { text: r[1] })); tbl.appendChild(tr); });
-        b.appendChild(tbl);
-        b.appendChild(el("div", { class: "hint", text: "快捷键为内置固定值；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
+        // 直接渲染统一快捷键表：与菜单提示、实际按键响应同源，改键后此处自动跟随
+        SN.shortcuts.groups().forEach(g => {
+          b.appendChild(el("div", { class: "about-sec", text: g.name }));
+          const tbl = el("table", { class: "tbl" });
+          const tr0 = el("tr");
+          tr0.appendChild(el("th", { text: "功能" }));
+          tr0.appendChild(el("th", { text: "快捷键" }));
+          tbl.appendChild(tr0);
+          g.items.forEach(it => {
+            const tr = el("tr");
+            tr.appendChild(el("td", { text: it.label }));
+            tr.appendChild(el("td", { text: it.accel || "—" }));
+            tbl.appendChild(tr);
+          });
+          b.appendChild(tbl);
+        });
+        b.appendChild(el("div", { class: "hint", text: "本表来自 js/shortcuts.js：菜单右侧提示、实际按键响应与此处一览同源，改键后三处一起变。撤销/重做在文本域内也按本表判定；剪切/复制/粘贴/全选为浏览器原生行为；缩放用工具栏 ＋/－；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
       }
     });
   };

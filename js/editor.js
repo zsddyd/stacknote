@@ -118,13 +118,18 @@
     _onKey(e) {
       const ta = this.ta;
       if (e.isComposing) return;
+      // 撤销/重做同样以快捷键表为准（js/shortcuts.js），这样将来改键在文本域内也生效；
+      // 万一表不可用，退回内置默认键，避免脚本顺序意外变化导致撤销失效。
+      const sc = window.SN && window.SN.shortcuts;
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        e.shiftKey ? this.redo() : this.undo();
-        return;
-      }
-      if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); this.redo(); return; }
+      const isUndo = sc
+        ? sc.matchEvent(e, sc.accelOf("edit.undo"))
+        : (mod && (e.key === "z" || e.key === "Z") && !e.shiftKey);
+      const isRedo = sc
+        ? (sc.matchEvent(e, sc.accelOf("edit.redo")) || sc.matchEvent(e, sc.accelOf("edit.redoAlt")))
+        : (mod && (e.key === "y" || e.key === "Y" || (e.key === "z" || e.key === "Z") && e.shiftKey));
+      if (isRedo) { e.preventDefault(); this.redo(); return; }
+      if (isUndo) { e.preventDefault(); this.undo(); return; }
       if (e.key === "Tab" && !this.readOnly) {
         e.preventDefault();
         this._insertTab(e.shiftKey);

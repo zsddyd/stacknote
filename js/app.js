@@ -131,16 +131,22 @@
         mi.appendChild(el("span", { text: it.checked ? "☑" : "☐" }));
       }
       mi.appendChild(el("span", { text: it.label || "" }));
-      if (it.accel) mi.appendChild(el("span", { class: "accel", text: it.accel }));
+      // 快捷键提示与点击行为统一取 SN.shortcuts 表（js/shortcuts.js）：
+      // 有 sc 的菜单项，显示与执行都来自同一处定义，不会出现「菜单写的键」与「实际按的键」脱节。
+      // where 为 native 的项（剪切/复制/粘贴/全选）表里没有 run，菜单自带 action 走 execNative。
+      const scDef = it.sc ? SN.shortcuts.byId(it.sc) : null;
+      const accel = it.sc ? SN.shortcuts.accelOf(it.sc) : it.accel;
+      if (accel) mi.appendChild(el("span", { class: "accel", text: accel }));
       if (it.tip) mi.title = it.tip;
-      if (!it.disabled && it.action) mi.addEventListener("click", (e) => {
+      const act = it.action || (scDef && scDef.run ? scDef.run : null);
+      if (!it.disabled && act) mi.addEventListener("click", (e) => {
         e.stopPropagation();
         if (it.stay) {
-          it.action();
+          act();
           if (it.rebuild) rebuildNestedPop();
         } else {
           closeMenus();
-          it.action();
+          act();
         }
       });
       if (it.id) mi.dataset.id = it.id;
@@ -185,17 +191,17 @@
   function buildAllMenus() {
     const menus = [
       { label: "文件", items: [
-        { label: "新建", accel: "Ctrl+T", action: () => cmd.new() },
-        { label: "打开…", accel: "Ctrl+O", action: () => cmd.open("auto") },
+        { label: "新建", sc: "file.new" },
+        { label: "打开…", sc: "file.open" },
         { label: "以文本模式打开…", action: () => cmd.open("text") },
         { label: "以二进制(Hex)打开…", action: () => cmd.open("hex") },
         "-",
-        { label: "保存", accel: "Ctrl+S", action: () => cmd.save() },
+        { label: "保存", sc: "file.save" },
         { label: "全部保存", action: () => cmd.saveAll() },
-        { label: "另存为…", accel: "Ctrl+Shift+S", action: () => cmd.saveAs() },
+        { label: "另存为…", sc: "file.saveAs" },
         { label: "重命名…", action: () => cmd.renameActive() },
         "-",
-        { label: "关闭标签", accel: "Ctrl+W", action: () => cmd.closeTab() },
+        { label: "关闭标签", sc: "file.closeTab" },
         { label: "关闭其它", action: () => cmd.closeOthers() },
         { label: "关闭全部", action: () => cmd.closeAll() },
         "-",
@@ -205,16 +211,16 @@
         { label: "退出(仅关闭本页标签集)", action: () => persistSession() }
       ]},
       { label: "编辑", items: [
-        { label: "撤销", accel: "Ctrl+Z", action: () => edCmd("undo") },
-        { label: "重做", accel: "Ctrl+Y", action: () => edCmd("redo") },
+        { label: "撤销", sc: "edit.undo" },
+        { label: "重做", sc: "edit.redo" },
         "-",
-        { label: "剪切", accel: "Ctrl+X", action: () => execNative("cut") },
-        { label: "复制", accel: "Ctrl+C", action: () => execNative("copy") },
-        { label: "粘贴", accel: "Ctrl+V", action: () => execNative("paste") },
+        { label: "剪切", sc: "edit.cut", action: () => execNative("cut") },
+        { label: "复制", sc: "edit.copy", action: () => execNative("copy") },
+        { label: "粘贴", sc: "edit.paste", action: () => execNative("paste") },
         "-",
-        { label: "全选", accel: "Ctrl+A", action: () => execNative("selectAll") },
+        { label: "全选", sc: "edit.selectAll", action: () => execNative("selectAll") },
         "-",
-        { label: "跳转行…", accel: "Ctrl+G", action: () => dlg.gotoLine() },
+        { label: "跳转行…", sc: "edit.goto" },
         "-",
         { label: "换行符转换", sub: [
           { label: "转为 Windows(CR+LF)", action: () => cmd.eolConv("crlf") },
@@ -233,7 +239,7 @@
         { label: "大小写转换", sub: caseItems() },
         { label: "行编辑", sub: lineItems() },
         "-",
-        { label: "列块编辑…", accel: "Alt+X", action: () => dlg.columnEdit() },
+        { label: "列块编辑…", sc: "edit.columnEdit" },
         { label: "列块模式(勾选进行多选)", checked: false, id: "colmode", disabled: true, tip: "浏览器多选区受限，请使用列块编辑对话框" }
       ]},
       { label: "查找", items: findMenuItems() },
@@ -274,11 +280,11 @@
   }
   function findMenuItems() {
     return [
-      { label: "查找…", accel: "Ctrl+F", action: () => dlg.find("find") },
-      { label: "替换…", accel: "Ctrl+H", action: () => dlg.find("replace") },
-      { label: "查找下一个", accel: "F3", action: () => dlg.findNext() },
-      { label: "查找上一个", accel: "F4", action: () => dlg.findPrev() },
-      { label: "在打开的文档中查找…", accel: "Ctrl+Shift+F", action: () => dlg.find("opendocs") },
+      { label: "查找…", sc: "find.open" },
+      { label: "替换…", sc: "find.replace" },
+      { label: "查找下一个", sc: "find.next" },
+      { label: "查找上一个", sc: "find.prev" },
+      { label: "在打开的文档中查找…", sc: "find.openDocs" },
       "-",
       { label: "全部标记(Mark All)", action: () => cmd.markAll() },
       { label: "清除全部标记", action: () => cmd.clearMarksAll() },
@@ -319,7 +325,7 @@
   }
   function lineItems() {
     return [
-      { label: "复制当前行", accel: "Ctrl+D", action: () => cmd.lineOp("dup") },
+      { label: "复制当前行", sc: "line.dup" },
       { label: "删除行(删除连续重复行)", action: () => cmd.lineOp("delDupConsec") },
       { label: "删除所有重复行", action: () => cmd.lineOp("delDupAll") },
       { label: "拆分长行", action: () => cmd.lineOp("split") },
@@ -343,9 +349,9 @@
   }
   function bookMarkItems() {
     return [
-      { label: "设置/移除书签", accel: "Ctrl+F2", action: () => cmd.toggleBookmark() },
-      { label: "下一个书签", accel: "F2", action: () => cmd.gotoBookmark(1) },
-      { label: "上一个书签", accel: "Shift+F2", action: () => cmd.gotoBookmark(-1) },
+      { label: "设置/移除书签", sc: "bookmark.toggle" },
+      { label: "下一个书签", sc: "bookmark.next" },
+      { label: "上一个书签", sc: "bookmark.prev" },
       { label: "清除全部书签", action: () => cmd.clearBookmarks() }
     ];
   }
@@ -847,21 +853,9 @@
         if (e.key === "Escape") closeModal();
         return;
       }
-      const k = e.key.toLowerCase();
-      const mod = e.ctrlKey || e.metaKey;
-      const shift = e.shiftKey;
-      if (mod && k === "o") { e.preventDefault(); cmd.open("auto"); return; }
-      if (mod && k === "t") { e.preventDefault(); cmd.new(); return; }
-      if (mod && k === "s") { e.preventDefault(); shift ? cmd.saveAs() : cmd.save(); return; }
-      if (mod && k === "w") { e.preventDefault(); cmd.closeTab(); return; }
-      if (mod && k === "f") { e.preventDefault(); dlg.find("find"); return; }
-      if (mod && k === "h") { e.preventDefault(); dlg.find("replace"); return; }
-      if (mod && k === "g") { e.preventDefault(); dlg.gotoLine(); return; }
-      if (mod && k === "z") { /* 编辑器内处理 */ }
-      if (k === "f3") { e.preventDefault(); dlg.findNext(); return; }
-      if (k === "f4") { e.preventDefault(); dlg.findPrev(); return; }
-      if (e.key === "F2") { e.preventDefault(); gotoBookmark(e.shiftKey ? -1 : 1); return; }
-      if (e.ctrlKey && e.key === "F2") { e.preventDefault(); toggleBookmark(); return; }
+      // 按键匹配与执行统一由 SN.shortcuts 表驱动（js/shortcuts.js）：
+      // 这里只负责「模态框内不响应」这一层拦截，快捷键本身不再散落成 if 分支。
+      SN.shortcuts.dispatch(e);
     });
   }
 
