@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="StackNote">
+  <title>StackNote</title>
+  <!-- 小尺寸专用版：16px 下仍可辨认（无描边、元素加粗、层数减到两层）
+       大图用完整三层几何（icons/icon-512.png 等）；两版同一语言，只是小尺寸做了光学简化 -->
+  <g transform="translate(512,512) scale(1.32) translate(-510,-530)">
+    <!-- 后排浅蓝文档 -->
+    <rect x="180" y="200" width="530" height="530" rx="70" fill="#C0DCF2"/>
+    <!-- 前排橙色编辑面板 -->
+    <rect x="310" y="330" width="530" height="530" rx="76" fill="#FAAA3C"/>
+    <!-- 行号栏 -->
+    <rect x="330" y="470" width="36" height="256" rx="18" fill="#26282C" opacity="0.85"/>
+    <!-- 三行代码 -->
+    <rect x="400" y="470" width="370" height="64" rx="32" fill="#FFFFFF"/>
+    <rect x="400" y="566" width="280" height="64" rx="32" fill="#FFFFFF"/>
+    <rect x="400" y="662" width="330" height="64" rx="32" fill="#FFFFFF"/>
+  </g>
+</svg>

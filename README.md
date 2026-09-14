@@ -80,6 +80,8 @@ node smoke.js
 - 编辑区 = `<textarea>`（透明文字）+ 高亮 `<pre>` 覆盖层 + 行号侧栏（对齐/滚动同步）
 - 持久化 = IndexedDB（配置/会话/文件句柄/用户插件）+ localStorage 兜底
 - 会话持久化对 >4MB 的正文自动跳过（大文档重启后需重新打开），避免写库卡顿
+- 编码探测分档：≤1MB 整篇校验（与旧实现结果一致）；>1MB 只采样头/中/尾（合计约 512KB）判定，
+  BOM 仍按文件开头精确判定 —— 打开大文件不再有 1~3 秒的主线程阻塞（200MB 实测约 630ms → 数毫秒）
 - 文件写入优先走 File System Access API（Chrome/Edge），否则回退为“下载”
 
 ## 文件结构
@@ -87,6 +89,13 @@ node smoke.js
 ```text
 index.html             入口
 manifest.webmanifest   PWA manifest
+icons/favicon.svg      应用图标（SVG，小尺寸优化版：无描边、元素加粗，16px 可辨认）
+icons/favicon.ico      16/32/48 位图图标（旧浏览器 / 书签栏）
+icons/apple-touch-icon.png  iOS 主屏图标（180，满幅橙底）
+icons/icon-192.png     PWA 图标
+icons/icon-512.png     PWA 图标
+icons/icon-maskable-512.png  PWA maskable 图标（满幅橙底，内容收在 80% 安全圆内）
+icons/stacknote-icon.svg     图标矢量母版（大尺寸版的设计源，改完重新导出上面 4 个 PNG）
 css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
 js/util.js             基础工具/事件总线
 js/viewcaps.js         视图能力表（文本/大文本只读/Hex 各支持哪些功能，菜单与快捷键据此置灰）
@@ -102,6 +111,41 @@ js/textops.js          文本变换纯函数
 js/app.js              应用框架：菜单/工具栏/标签/文档/状态栏/对话框骨架
 js/app2.js             业务实现：查找/编辑操作/Hex/工具/插件/选项/启动
 ```
+
+## 应用图标
+
+画面主题是**三层叠放的编辑器页面**：浅蓝文档、白纸、橙色编辑面板，带标签页、行号方块、
+行号栏竖线与三行代码色块。配色严格取品牌值：`#FAAA3C`（主橙）/ `#FFFFFF` / `#C0DCF2`（浅蓝）
+/ `#26282C`（线条）。
+
+同一套设计语言下有**两套几何**，因为一套图形不可能同时照顾 16px 与 512px：
+
+- `icons/favicon.svg` —— **小尺寸版**：去掉全部描边、元素加粗、层数减到两层，只留行号栏与三行代码。
+  实测 16px 下仍能看出「叠放的两页 + 文本行」。
+- `icons/icon-192.png` / `icon-512.png` / `icon-maskable-512.png` / `apple-touch-icon.png`
+  —— **大尺寸版**：完整三层纸、行号方块、标题栏分隔线、行号栏竖线。其矢量母版是
+  `icons/stacknote-icon.svg`（1024 坐标系），改颜色、比例或层数都改它。
+
+`icons/` 里除矢量母版外的 6 个文件都是出货资产。重新导出（需要 `rsvg-convert` 与 ImageMagick）：
+
+```bash
+rsvg-convert -w 512 -h 512 icons/stacknote-icon.svg -o icons/icon-512.png
+rsvg-convert -w 192 -h 192 icons/stacknote-icon.svg -o icons/icon-192.png
+rsvg-convert -w 16 -h 16 icons/favicon.svg -o /tmp/f16.png    # 24/32/48 同理
+magick /tmp/f16.png /tmp/f32.png /tmp/f48.png icons/favicon.ico
+```
+
+maskable 与 apple-touch 需要在满幅橙底（`#FAAA3C`）上把母版缩到 74.9% / 82% 并居中，再合成导出
+——前者保证内容落在 80% 安全圆内，后者避免 iOS 上出现透明边。
+
+关于 `favicon.ico` 不在站点根目录：只要 `index.html` 里声明了 `<link rel="icon">`，浏览器就按声明取图，
+不会再去请求惯例路径 `/favicon.ico` —— 实测 Chrome 149：页面加载全程**未**请求根目录 `/favicon.ico`，
+只取了声明过的 `icons/` 路径。少数不解析 HTML 的抓取方（部分 RSS 阅读器、老式爬虫、个别 IM 的链接
+预览）会盲取 `/favicon.ico`，它们会拿到 404；如果在意这类边角场景，把 `favicon.ico` 复制一份回根目录
+即可，其它文件仍可留在 `icons/`。
+
+`smoke.js` 会校验 `index.html` / `manifest.webmanifest` 声明的图标在磁盘上确实存在、且 PNG 尺寸
+与声明一致 —— 清单引用缺失图标是静态托管最常见的坑（本地看着正常，装上应用却没有图标）。
 
 ## 部署到静态托管
 

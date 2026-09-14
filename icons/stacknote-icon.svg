@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="StackNote">
+  <title>StackNote</title>
+  <!-- 矢量母版：三层叠放的编辑器页面 + 行号 + 代码行
+       比例取自最初那张文生图初稿的实测坐标（2048px 画布 ÷2 = 本文件 1024 坐标系）
+       配色严格取品牌值：橙 #FAAA3C / 白 #FFFFFF / 浅蓝 #C0DCF2 / 深色 #26282C
+       相较原图已删除标题栏的 3 个窗口圆点（读起来像浏览器窗口，且小尺寸最先糊掉） -->
+  <g transform="translate(-104.2,-71.2) scale(1.2)">
+    <!-- 后排：浅蓝文档 + 橙色标签 -->
+    <rect x="249" y="141" width="52" height="62" rx="10" fill="#FAAA3C" stroke="#26282C" stroke-width="9"/>
+    <rect x="197" y="199" width="531" height="537" rx="36" fill="#C0DCF2" stroke="#26282C" stroke-width="9"/>
+
+    <!-- 中层：白纸 + 橙色标签 -->
+    <rect x="333" y="183" width="52" height="62" rx="10" fill="#FAAA3C" stroke="#26282C" stroke-width="9"/>
+    <rect x="238" y="241" width="533" height="542" rx="36" fill="#FFFFFF" stroke="#26282C" stroke-width="9"/>
+    <!-- 行号方块（落在白纸上） -->
+    <rect x="261" y="388" width="20" height="20" rx="4" fill="#26282C"/>
+    <rect x="261" y="438" width="20" height="20" rx="4" fill="#26282C"/>
+    <rect x="261" y="488" width="20" height="20" rx="4" fill="#26282C"/>
+
+    <!-- 前排：橙色编辑面板 + 橙色标签 -->
+    <rect x="397" y="234" width="52" height="56" rx="10" fill="#FAAA3C" stroke="#26282C" stroke-width="11"/>
+    <rect x="293" y="284" width="537" height="547" rx="45" fill="#FAAA3C" stroke="#26282C" stroke-width="11"/>
+    <!-- 标题栏分隔线 -->
+    <rect x="304" y="356" width="515" height="9" fill="#26282C" opacity="0.55"/>
+    <!-- 行号栏竖线 -->
+    <rect x="356" y="452" width="10" height="324" rx="5" fill="#26282C" opacity="0.85"/>
+    <!-- 三行代码（抽象色块，非可读文字） -->
+    <rect x="423" y="450" width="224" height="42" rx="21" fill="#FFFFFF"/>
+    <rect x="423" y="540" width="320" height="42" rx="21" fill="#FFFFFF"/>
+    <rect x="423" y="630" width="251" height="42" rx="21" fill="#FFFFFF"/>
+  </g>
+</svg>

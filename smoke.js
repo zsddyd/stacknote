@@ -138,6 +138,98 @@ function assert(cond, msg) { if (!cond) throw new Error("断言失败: " + msg);
 assert(SN && SN.app && SN.app.boot, "app.boot 存在");
 assert(SN.encodeText("中文测试", "utf8bom")[0] === 0xef, "utf8bom");
 assert(SN.detectEncode(SN.encodeText("你好", "utf8")).id === "utf8", "detect utf8");
+
+// 编码探测分档：小文件仍全量校验（与旧行为一致），大文件只采样头/中/尾（毫秒级）
+{
+  const MB = 1024 * 1024;
+  const rep = (arr, k) => { const out = new Uint8Array(arr.length * k); for (let i = 0; i < k; i++) out.set(arr, i * arr.length); return out; };
+  const cat = (...ps) => {
+    const o = new Uint8Array(ps.reduce((a, p) => a + p.length, 0));
+    let at = 0; ps.forEach(p => { o.set(p, at); at += p.length; });
+    return o;
+  };
+  const gbkCJK = new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]);              // GBK 的“中文”
+  const nl = new Uint8Array([10]);
+  const u16le = (t) => { const o = new Uint8Array(t.length * 2); for (let i = 0; i < t.length; i++) o[i * 2] = t.charCodeAt(i); return o; };
+
+  // ① 小文件：走全量路径，各类样本的判定与旧实现一致
+  const smallCases = [
+    [SN.encodeText("hello", "utf8"), "utf8"],
+    [SN.encodeText("你好世界", "utf8"), "utf8"],
+    [SN.encodeText("你好", "utf8bom"), "utf8bom"],
+    [SN.encodeText("你好", "utf16le"), "utf16le"],
+    [SN.encodeText("你好", "utf16be"), "utf16be"],
+    [gbkCJK, "gbk"],
+    [new Uint8Array([0x41, 0x80, 0x42, 0x43, 0x44]), "unknown"],       // 既非合法 UTF-8 也非合法 GBK
+    [u16le("ab\ncd\n"), "utf16le"]                                    // 无 BOM 的 UTF-16LE（靠 NUL 奇偶判）
+  ];
+  smallCases.forEach(([b, want], i) => {
+    const r = SN.detectEncode(b);
+    assert(r.id === want, "小文件编码探测[" + i + "] 期望 " + want + " 实际 " + r.id);
+    assert(r.sampled === false && r.sampledBytes === b.length, "小文件编码探测[" + i + "] 走全量路径");
+  });
+  assert(SN.detectEncode(SN.encodeText("你好", "utf8bom")).skip === 3, "utf8bom 跳过 3 字节 BOM");
+  assert(SN.detectEncode(SN.encodeText("你好", "utf16le")).skip === 2, "utf16le 跳过 2 字节 BOM");
+
+  // ② 大文件：走采样路径；关键用例是“ASCII 头 + GBK 尾”必须仍判对
+  const utf8Line = SN.encodeText("第N行 abc\n", "utf8");
+  const bigCases = [
+    [rep(utf8Line, Math.ceil(1.3 * MB / utf8Line.length)), "utf8"],
+    [rep(cat(gbkCJK, nl), 250000), "gbk"],                              // 1.25MB 纯 GBK
+    [cat(rep(new Uint8Array([0x41]), MB), rep(cat(gbkCJK, nl), 30000)), "gbk"],
+    [cat(rep(new Uint8Array([0x41]), MB), rep(new Uint8Array([0x80]), 3000)), "unknown"],
+    [cat(new Uint8Array([0x41]), rep(SN.encodeText("中", "utf8"), 400000)), "utf8"],   // 窗口切在汉字中间
+    [rep(u16le("abcdefgh\n"), Math.ceil(1.3 * MB / 18)), "utf16le"]
+  ];
+  bigCases.forEach(([b, want], i) => {
+    const r = SN.detectEncode(b);
+    assert(r.id === want, "大文件编码探测[" + i + "] 期望 " + want + " 实际 " + r.id);
+    assert(r.sampled === true, "大文件编码探测[" + i + "] 走采样路径");
+    assert(r.sampledBytes <= 512 * 1024 + 8, "大文件编码探测[" + i + "] 采样量有界，实际 " + r.sampledBytes);
+  });
+
+  // ③ 差分护栏：≤1MB 的判定必须与旧实现（全量校验）完全一致
+  const refDetect = (bytes) => {
+    const n = bytes.length;
+    const bs = (arr, at) => { for (let i = 0; i < arr.length; i++) if (bytes[at + i] !== arr[i]) return false; return true; };
+    if (n >= 3 && bs([0xef, 0xbb, 0xbf], 0)) return "utf8bom";
+    if (n >= 2 && bs([0xff, 0xfe], 0)) return "utf16le";
+    if (n >= 2 && bs([0xfe, 0xff], 0)) return "utf16be";
+    if (n > 4) {
+      let e = 0, o = 0;
+      for (let i = 0; i < n; i++) if (bytes[i] === 0) { if (i % 2 === 0) e++; else o++; }
+      if (e > n / 8 && e > o) return "utf16be";
+      if (o > n / 8) return "utf16le";
+    }
+    try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); return "utf8"; } catch (x) { }
+    try { new TextDecoder("gbk", { fatal: true }).decode(bytes); return "gbk"; } catch (x) { }
+    return "unknown";
+  };
+  let seed = 20260914;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const KINDS = ["ascii", "utf8", "utf8trunc", "gbk", "gbktrunc", "utf16le", "utf16le-nobom", "binary", "high"];
+  const srcUtf8 = SN.encodeText("中文行".repeat(3000), "utf8");
+  const srcUtf16 = SN.encodeText("abc行".repeat(1000), "utf16le");
+  const diffs = [];
+  for (let it = 0; it < 120; it++) {
+    const kind = KINDS[Math.floor(rnd() * KINDS.length)];
+    const len = 8 + Math.floor(rnd() * 2000);
+    let b = null;
+    if (kind === "ascii") { b = new Uint8Array(len); for (let i = 0; i < len; i++) b[i] = (i % 17 === 0) ? 10 : 0x41 + Math.floor(rnd() * 60); }
+    else if (kind === "utf8") b = srcUtf8.subarray(0, len - (len % 9));            // 按字符边界截断
+    else if (kind === "utf8trunc") b = srcUtf8.subarray(0, len);                    // 故意切在多字节字符中间
+    else if (kind === "gbk") { const k = Math.floor(len / 2) * 2; b = new Uint8Array(k); for (let i = 0; i < k; i += 2) { b[i] = 0x81 + Math.floor(rnd() * 0x7d); b[i + 1] = 0x40 + Math.floor(rnd() * 0xbe); } }
+    else if (kind === "gbktrunc") { b = new Uint8Array(len); for (let i = 0; i < len - 1; i += 2) { b[i] = 0x81 + Math.floor(rnd() * 0x7d); b[i + 1] = 0x40 + Math.floor(rnd() * 0xbe); } b[len - 1] = 0x81 + Math.floor(rnd() * 0x7d); }
+    else if (kind === "utf16le") b = srcUtf16.subarray(0, len - (len % 2));
+    else if (kind === "utf16le-nobom") b = srcUtf16.subarray(2, len - (len % 2));
+    else if (kind === "high") { b = new Uint8Array(len); for (let i = 0; i < len; i++) b[i] = 0xa0 + Math.floor(rnd() * 0x60); }
+    else { b = new Uint8Array(len); for (let i = 0; i < len; i++) b[i] = Math.floor(rnd() * 256); }
+    if (!b || b.length < 8) continue;
+    const want = refDetect(b), got = SN.detectEncode(b).id;
+    if (want !== got) diffs.push(kind + "/len" + b.length + " 旧=" + want + " 新=" + got);
+  }
+  assert(diffs.length === 0, "≤1MB 判定与旧实现不一致：\n" + diffs.slice(0, 5).join("\n"));
+}
 assert(SN.md5(new TextEncoder().encode("abc")) === "900150983cd24fb0d6963f7d28e17f72", "md5 abc");
 assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(SN.uuid()), "uuid v4");
 assert(SN.textops.caseText("hello", "upper") === "HELLO", "case");
@@ -624,6 +716,37 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     bigHead.handlers.click[0]();
     assert(!bigGroups[0].classList.contains("collapsed"), "大文件结果再次单击可展开");
   }
+
+    // ---- 静态图标资源一致性 ----
+    // 静态托管最常见的坑：manifest 引用了不存在的图标文件，本地看着没事、装上应用没图标。
+    // 这里把「html/manifest 声明」与「磁盘实际文件」对齐校验。
+    const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    const mf = JSON.parse(fs.readFileSync(path.join(__dirname, "manifest.webmanifest"), "utf8"));
+    const exists = (rel) => fs.existsSync(path.join(__dirname, rel));
+    const pngSize = (rel) => {
+      const b = fs.readFileSync(path.join(__dirname, rel));
+      assert(b.slice(1, 4).toString("latin1") === "PNG", rel + " 应是 PNG");
+      return [b.readUInt32BE(16), b.readUInt32BE(20)];
+    };
+    assert(exists("icons/favicon.svg"), "icons/favicon.svg 存在");
+    assert(exists("icons/apple-touch-icon.png"), "icons/apple-touch-icon.png 存在");
+    // 母版是大尺寸图标的唯一矢量源：丢了就只能重画（这条护栏是补上次它被误删的教训）
+    assert(exists("icons/stacknote-icon.svg"), "icons/stacknote-icon.svg 矢量母版存在");
+    assert(fs.readFileSync(path.join(__dirname, "icons/stacknote-icon.svg"), "utf8").indexOf("<svg") === 0,
+      "icons/stacknote-icon.svg 是 SVG 文件");
+    assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.svg/.test(html), "index.html 引用 icons/favicon.svg");
+    assert(/<link[^>]+rel="icon"[^>]+icons\/favicon\.ico/.test(html), "index.html 引用 icons/favicon.ico");
+    assert(/<link[^>]+rel="apple-touch-icon"[^>]+icons\/apple-touch-icon\.png/.test(html), "index.html 引用 icons/apple-touch-icon.png");
+    assert(Array.isArray(mf.icons) && mf.icons.length >= 3, "manifest 声明了 icons");
+    mf.icons.forEach(ic => {
+      assert(exists(ic.src), "manifest 图标文件存在：" + ic.src);
+      assert(ic.type === "image/png" && /^\d+x\d+$/.test(ic.sizes || ""), "manifest 图标声明 type/sizes：" + ic.src);
+      // 尺寸以声明为准，避免维护第二份硬编码清单
+      const [w, h] = pngSize(ic.src);
+      assert(ic.sizes === w + "x" + h, ic.src + " 实际尺寸与声明不符：声明 " + ic.sizes + "，实测 " + w + "x" + h);
+    });
+    assert(mf.icons.some(ic => String(ic.purpose).indexOf("maskable") >= 0), "manifest 含 maskable 图标");
+    assert(fs.readFileSync(path.join(__dirname, "icons/favicon.ico")).slice(0, 4).toString("hex") === "00000100", "icons/favicon.ico 文件头合法");
 
   console.log("SMOKE OK, docs =", SN.app.docs.length,
     "activeId =", SN.app.activeId,
