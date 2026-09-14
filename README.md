@@ -60,6 +60,8 @@ node smoke.js
 - 批量转换打开文档的编码标记
 - 插件系统：内置 Base64/URL/UUID/时间戳等脚本插件，可添加自定义 JS 变换插件
 - 快捷键一览（与 js/shortcuts.js 同源：菜单提示即实际按键）、选项对话框、关于
+- 视图能力提示：只读视图（大文本/Hex）下不适用的菜单、工具栏按钮与快捷键会置灰，
+  并按 js/viewcaps.js 的统一文案说明原因（不再出现“点了没反应”）
 
 ## 因浏览器/静态托管限制未实现
 
@@ -85,6 +87,7 @@ index.html             入口
 manifest.webmanifest   PWA manifest
 css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
 js/util.js             基础工具/事件总线
+js/viewcaps.js         视图能力表（文本/大文本只读/Hex 各支持哪些功能，菜单与快捷键据此置灰）
 js/shortcuts.js        快捷键唯一来源（菜单提示/按键分发/一览对话框同源，支持改键覆盖）
 js/themes.js           18 套编辑器主题 + 明暗皮肤
 js/langdefs.js         语言表（关键词/后缀/注释风格）

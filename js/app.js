@@ -137,9 +137,15 @@
       const scDef = it.sc ? SN.shortcuts.byId(it.sc) : null;
       const accel = it.sc ? SN.shortcuts.accelOf(it.sc) : it.accel;
       if (accel) mi.appendChild(el("span", { class: "accel", text: accel }));
-      if (it.tip) mi.title = it.tip;
+      // 视图能力（js/viewcaps.js）：当前文档不具备所需能力时置灰，
+      // 并把「为什么不可用」写进 tooltip，取代点下去毫无反应的旧行为。
+      const req = it.requires || (scDef && scDef.requires);
+      const blockedWhy = req && SN.caps ? SN.caps.reason(req, activeDoc()) : "";
+      if (blockedWhy) mi.classList.add("disabled");
+      const tip = blockedWhy || it.tip;
+      if (tip) mi.title = tip;
       const act = it.action || (scDef && scDef.run ? scDef.run : null);
-      if (!it.disabled && act) mi.addEventListener("click", (e) => {
+      if (!it.disabled && !blockedWhy && act) mi.addEventListener("click", (e) => {
         e.stopPropagation();
         if (it.stay) {
           act();
@@ -162,7 +168,7 @@
       if (l.id === "txt") continue;
       const key = l.name[0] ? l.name[0].toUpperCase() : "?";
       (groups[key] = groups[key] || []).push({
-        label: l.name, action: () => setActiveLang(l.id)
+        label: l.name, requires: "lang", action: () => setActiveLang(l.id)
       });
     }
     const out = [];
@@ -170,9 +176,9 @@
       out.push({ label: g, sub: groups[g] });
     });
     out.push("-");
-    out.push({ label: "XML", action: () => setActiveLang("xml") });
-    out.push({ label: "YAML", action: () => setActiveLang("yaml") });
-    out.push({ label: "TXT", action: () => setActiveLang("txt") });
+    out.push({ label: "XML", requires: "lang", action: () => setActiveLang("xml") });
+    out.push({ label: "YAML", requires: "lang", action: () => setActiveLang("yaml") });
+    out.push({ label: "TXT", requires: "lang", action: () => setActiveLang("txt") });
     out.push({ label: "用户自定义语言…", action: () => cmd.openDefineLang() });
     return out;
   }
@@ -196,9 +202,9 @@
         { label: "以文本模式打开…", action: () => cmd.open("text") },
         { label: "以二进制(Hex)打开…", action: () => cmd.open("hex") },
         "-",
-        { label: "保存", sc: "file.save" },
-        { label: "全部保存", action: () => cmd.saveAll() },
-        { label: "另存为…", sc: "file.saveAs" },
+        { label: "保存", sc: "file.save", requires: "save" },
+        { label: "全部保存", requires: "save", action: () => cmd.saveAll() },
+        { label: "另存为…", sc: "file.saveAs", requires: "save" },
         { label: "重命名…", action: () => cmd.renameActive() },
         "-",
         { label: "关闭标签", sc: "file.closeTab" },
@@ -211,35 +217,35 @@
         { label: "退出(仅关闭本页标签集)", action: () => persistSession() }
       ]},
       { label: "编辑", items: [
-        { label: "撤销", sc: "edit.undo" },
-        { label: "重做", sc: "edit.redo" },
+        { label: "撤销", sc: "edit.undo", requires: "undo" },
+        { label: "重做", sc: "edit.redo", requires: "undo" },
         "-",
-        { label: "剪切", sc: "edit.cut", action: () => execNative("cut") },
-        { label: "复制", sc: "edit.copy", action: () => execNative("copy") },
-        { label: "粘贴", sc: "edit.paste", action: () => execNative("paste") },
+        { label: "剪切", sc: "edit.cut", requires: "clipboard", action: () => execNative("cut") },
+        { label: "复制", sc: "edit.copy", requires: "clipboard", action: () => execNative("copy") },
+        { label: "粘贴", sc: "edit.paste", requires: "clipboard", action: () => execNative("paste") },
         "-",
-        { label: "全选", sc: "edit.selectAll", action: () => execNative("selectAll") },
+        { label: "全选", sc: "edit.selectAll", requires: "clipboard", action: () => execNative("selectAll") },
         "-",
         { label: "跳转行…", sc: "edit.goto" },
         "-",
         { label: "换行符转换", sub: [
-          { label: "转为 Windows(CR+LF)", action: () => cmd.eolConv("crlf") },
-          { label: "转为 Unix(LF)", action: () => cmd.eolConv("lf") },
-          { label: "转为 Mac(CR)", action: () => cmd.eolConv("cr") }
+          { label: "转为 Windows(CR+LF)", requires: "edit", action: () => cmd.eolConv("crlf") },
+          { label: "转为 Unix(LF)", requires: "edit", action: () => cmd.eolConv("lf") },
+          { label: "转为 Mac(CR)", requires: "edit", action: () => cmd.eolConv("cr") }
         ]},
         { label: "空白字符操作", sub: [
-          { label: "移除行首空白", action: () => cmd.blankOp("head") },
-          { label: "移除行尾空白", action: () => cmd.blankOp("end") },
-          { label: "移除首尾空白", action: () => cmd.blankOp("both") },
+          { label: "移除行首空白", requires: "edit", action: () => cmd.blankOp("head") },
+          { label: "移除行尾空白", requires: "edit", action: () => cmd.blankOp("end") },
+          { label: "移除首尾空白", requires: "edit", action: () => cmd.blankOp("both") },
           "-",
-          { label: "TAB → 空格", action: () => cmd.tabOp("tab2space") },
-          { label: "空格 → TAB(全部)", action: () => cmd.tabOp("space2tabAll") },
-          { label: "空格 → TAB(行首)", action: () => cmd.tabOp("space2tabLead") }
+          { label: "TAB → 空格", requires: "edit", action: () => cmd.tabOp("tab2space") },
+          { label: "空格 → TAB(全部)", requires: "edit", action: () => cmd.tabOp("space2tabAll") },
+          { label: "空格 → TAB(行首)", requires: "edit", action: () => cmd.tabOp("space2tabLead") }
         ]},
         { label: "大小写转换", sub: caseItems() },
         { label: "行编辑", sub: lineItems() },
         "-",
-        { label: "列块编辑…", sc: "edit.columnEdit" },
+        { label: "列块编辑…", sc: "edit.columnEdit", requires: "columnEdit" },
         { label: "列块模式(勾选进行多选)", checked: false, id: "colmode", disabled: true, tip: "浏览器多选区受限，请使用列块编辑对话框" }
       ]},
       { label: "查找", items: findMenuItems() },
@@ -256,16 +262,16 @@
         { label: "English(占位，未提供)", disabled: true, tip: "本演示版仅提供中文界面" }
       ]},
       { label: "工具", items: [
-        { label: "XML 格式化", action: () => tool.format("xml") },
-        { label: "JSON 格式化", action: () => tool.format("json") },
+        { label: "XML 格式化", requires: "format", action: () => tool.format("xml") },
+        { label: "JSON 格式化", requires: "format", action: () => tool.format("json") },
         { label: "MD5/SHA 计算…", action: () => tool.hash() },
-        { label: "列块编辑…", action: () => dlg.columnEdit() },
+        { label: "列块编辑…", requires: "columnEdit", action: () => dlg.columnEdit() },
         "-",
         { label: "批量转换编码(打开文档)", action: () => tool.batchEncode() },
         "-",
-        { label: "统计选中行/字数", action: () => cmd.edStatus() }
+        { label: "统计选中行/字数", requires: "statusPos", action: () => cmd.edStatus() }
       ]},
-      { label: "插件", items: SN.pluginMenuItems() },
+      { label: "插件", items: SN.pluginMenuItems().map(it => (it && it.action ? Object.assign({ requires: "plugin" }, it) : it)) },
       { label: "关于", items: [{ label: "关于 StackNote", action: () => dlg.about() }] }
     ];
     buildMenu(menus);
@@ -280,11 +286,11 @@
   }
   function findMenuItems() {
     return [
-      { label: "查找…", sc: "find.open" },
-      { label: "替换…", sc: "find.replace" },
-      { label: "查找下一个", sc: "find.next" },
-      { label: "查找上一个", sc: "find.prev" },
-      { label: "在打开的文档中查找…", sc: "find.openDocs" },
+      { label: "查找…", sc: "find.open", requires: "find" },
+      { label: "替换…", sc: "find.replace", requires: "replace" },
+      { label: "查找下一个", sc: "find.next", requires: "find" },
+      { label: "查找上一个", sc: "find.prev", requires: "find" },
+      { label: "在打开的文档中查找…", sc: "find.openDocs", requires: "find" },
       "-",
       { label: "全部标记(Mark All)", action: () => cmd.markAll() },
       { label: "清除全部标记", action: () => cmd.clearMarksAll() },
@@ -299,9 +305,9 @@
   function viewItems() {
     const s = app.settings;
     return [
-      { label: "自动换行", checked: s.wrap, action: () => cmd.toggleWrap() },
-      { label: "显示空白", checked: s.showSpaces, action: () => cmd.toggleSpaces() },
-      { label: "显示行尾", checked: s.showEol, action: () => cmd.toggleEol() },
+      { label: "自动换行", checked: s.wrap, requires: "view", action: () => cmd.toggleWrap() },
+      { label: "显示空白", checked: s.showSpaces, requires: "view", action: () => cmd.toggleSpaces() },
+      { label: "显示行尾", checked: s.showEol, requires: "view", action: () => cmd.toggleEol() },
       "-",
       { label: "高亮 Web 地址", checked: s.webAddrHighlight, action: () => cmd.toggleWeb() },
       { label: "文件列表窗口", checked: !SN.$("#fileDock").classList.contains("hidden"), action: () => cmd.toggleFileDock() },
@@ -310,8 +316,8 @@
   }
   function encItems() {
     return [
-      { label: "以编码重新加载", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, action: () => cmd.reloadWith(c.id) })) },
-      { label: "转换为编码", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, action: () => cmd.convertTo(c.id) })) },
+      { label: "以编码重新加载", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, requires: "encoding", action: () => cmd.reloadWith(c.id) })) },
+      { label: "转换为编码", sub: SN.CODES.filter(c => c.id !== "unknown").map(c => ({ label: c.name, requires: "encoding", action: () => cmd.convertTo(c.id) })) },
       "-",
       { label: "批量转换编码…", action: () => tool.batchEncode() }
     ];
@@ -321,22 +327,22 @@
       ["upper", "UPPERCASE"], ["lower", "lowercase"], ["proper", "Proper Case"],
       ["properB", "Proper Case(保留已大写)"], ["sentence", "Sentence case"], ["invert", "Invert Case"], ["random", "Random Case"]
     ];
-    return defs.map(([id, l]) => ({ label: l, action: () => cmd.caseOp(id) }));
+    return defs.map(([id, l]) => ({ label: l, requires: "edit", action: () => cmd.caseOp(id) }));
   }
   function lineItems() {
     return [
-      { label: "复制当前行", sc: "line.dup" },
-      { label: "删除行(删除连续重复行)", action: () => cmd.lineOp("delDupConsec") },
-      { label: "删除所有重复行", action: () => cmd.lineOp("delDupAll") },
-      { label: "拆分长行", action: () => cmd.lineOp("split") },
+      { label: "复制当前行", sc: "line.dup", requires: "edit" },
+      { label: "删除行(删除连续重复行)", requires: "edit", action: () => cmd.lineOp("delDupConsec") },
+      { label: "删除所有重复行", requires: "edit", action: () => cmd.lineOp("delDupAll") },
+      { label: "拆分长行", requires: "edit", action: () => cmd.lineOp("split") },
       "-",
-      { label: "上移当前行", action: () => cmd.lineOp("up") },
-      { label: "下移当前行", action: () => cmd.lineOp("down") },
+      { label: "上移当前行", requires: "edit", action: () => cmd.lineOp("up") },
+      { label: "下移当前行", requires: "edit", action: () => cmd.lineOp("down") },
       "-",
-      { label: "删除空行", action: () => cmd.lineOp("delEmpty") },
-      { label: "删除空行(含纯空白行)", action: () => cmd.lineOp("delEmptyWs") },
+      { label: "删除空行", requires: "edit", action: () => cmd.lineOp("delEmpty") },
+      { label: "删除空行(含纯空白行)", requires: "edit", action: () => cmd.lineOp("delEmptyWs") },
       "-",
-      { label: "反转行序", action: () => cmd.lineOp("reverse") },
+      { label: "反转行序", requires: "edit", action: () => cmd.lineOp("reverse") },
       { label: "排序", sub: sortItems() }
     ];
   }
@@ -345,14 +351,14 @@
       ["lex_asc", "字典升序"], ["lex_desc", "字典降序"], ["lexci_asc", "忽略大小写升序"],
       ["lexci_desc", "忽略大小写降序"], ["num_asc", "数值升序"], ["num_desc", "数值降序"]
     ];
-    return ds.map(([id, l]) => ({ label: l, action: () => cmd.sortOp(id) }));
+    return ds.map(([id, l]) => ({ label: l, requires: "edit", action: () => cmd.sortOp(id) }));
   }
   function bookMarkItems() {
     return [
-      { label: "设置/移除书签", sc: "bookmark.toggle" },
-      { label: "下一个书签", sc: "bookmark.next" },
-      { label: "上一个书签", sc: "bookmark.prev" },
-      { label: "清除全部书签", action: () => cmd.clearBookmarks() }
+      { label: "设置/移除书签", sc: "bookmark.toggle", requires: "bookmark" },
+      { label: "下一个书签", sc: "bookmark.next", requires: "bookmark" },
+      { label: "上一个书签", sc: "bookmark.prev", requires: "bookmark" },
+      { label: "清除全部书签", requires: "bookmark", action: () => cmd.clearBookmarks() }
     ];
   }
   function markColorItems() {
@@ -379,37 +385,44 @@
   const TB = {
     new: { t: "新建(Ctrl+T)", g: "📄", a: () => cmd.new() },
     open: { t: "打开", g: "📂", a: () => cmd.open("auto") },
-    save: { t: "保存", g: "💾", a: () => cmd.save() },
-    saveall: { t: "全部保存", g: "💿", a: () => cmd.saveAll() },
+    save: { t: "保存", g: "💾", requires: "save", a: () => cmd.save() },
+    saveall: { t: "全部保存", g: "💿", requires: "save", a: () => cmd.saveAll() },
     close: { t: "关闭", g: "❌", a: () => cmd.closeTab() },
     closeall: { t: "关闭全部", g: "🗑", a: () => cmd.closeAll() },
     sep1: "-",
-    cut: { t: "剪切", g: "✂️", a: () => execNative("cut") },
-    copy: { t: "复制", g: "📑", a: () => execNative("copy") },
-    paste: { t: "粘贴", g: "📋", a: () => execNative("paste") },
+    cut: { t: "剪切", g: "✂️", requires: "clipboard", a: () => execNative("cut") },
+    copy: { t: "复制", g: "📑", requires: "clipboard", a: () => execNative("copy") },
+    paste: { t: "粘贴", g: "📋", requires: "clipboard", a: () => execNative("paste") },
     sep2: "-",
-    undo: { t: "撤销", g: "↺", a: () => edCmd("undo") },
-    redo: { t: "重做", g: "↻", a: () => edCmd("redo") },
+    undo: { t: "撤销", g: "↺", requires: "undo", a: () => edCmd("undo") },
+    redo: { t: "重做", g: "↻", requires: "undo", a: () => edCmd("redo") },
     sep3: "-",
-    find: { t: "查找", g: "🔍", a: () => dlg.find("find") },
-    replace: { t: "替换", g: "🔁", a: () => dlg.find("replace") },
+    find: { t: "查找", g: "🔍", requires: "find", a: () => dlg.find("find") },
+    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find("replace") },
     mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",
-    zoomin: { t: "放大", g: "➕", a: () => cmd.zoom(10) },
-    zoomout: { t: "缩小", g: "➖", a: () => cmd.zoom(-10) },
+    zoomin: { t: "放大", g: "➕", requires: "zoom", a: () => cmd.zoom(10) },
+    zoomout: { t: "缩小", g: "➖", requires: "zoom", a: () => cmd.zoom(-10) },
     sep5: "-",
-    wrap: { t: "自动换行", g: "⇆", toggle: () => app.settings.wrap, a: () => cmd.toggleWrap() },
-    blank: { t: "显示空白/制表符", g: "␣", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() }
+    wrap: { t: "自动换行", g: "⇆", requires: "view", toggle: () => app.settings.wrap, a: () => cmd.toggleWrap() },
+    blank: { t: "显示空白/制表符", g: "␣", requires: "view", toggle: () => app.settings.showSpaces, a: () => cmd.toggleSpaces() }
   };
   function buildToolbar() {
     toolbar.textContent = "";
     for (const key of Object.keys(TB)) {
       const def = TB[key];
       if (def === "-") { toolbar.appendChild(el("div", { class: "tbsep" })); continue; }
-      const b = el("button", { class: "iconbt" + (def.toggle && def.toggle() ? " on" : ""), title: def.t, text: def.g });
+      // 同菜单：当前视图不具备所需能力时置灰并说明原因（不接点击，tooltip 仍可见）
+      const why = def.requires && SN.caps ? SN.caps.reason(def.requires, activeDoc()) : "";
+      const b = el("button", {
+        class: "iconbt" + (def.toggle && def.toggle() ? " on" : "") + (why ? " disabled" : ""),
+        title: why ? (def.t + " — " + why) : def.t,
+        text: def.g
+      });
+      if (why) b.setAttribute("aria-disabled", "true");
       if (def.disabled) b.disabled = true;
-      if (def.a) b.addEventListener("click", def.a);
+      if (def.a && !why) b.addEventListener("click", def.a);
       toolbar.appendChild(b);
     }
   }
@@ -568,6 +581,12 @@
     SN.$("#codeLabel").textContent = SN.codeById(d.enc).name;
     const eol = SN.$("#eolSel");
     if (eol.value !== d.eol) eol.value = d.eol;
+    // 行列定位只由 Editor 上报：大文件/Hex 视图没有 Editor，若不显式改写，
+    // 状态栏会一直停留在上一个文档的 Ln/Col（看起来像当前文档的位置）。
+    if (SN.caps && !SN.caps.can("statusPos", d)) {
+      SN.$("#posLabel").textContent = SN.caps.reason("statusPos", d);
+    }
+    if (eol) eol.disabled = !!(SN.caps && !SN.caps.can("eolSwitch", d));
     updateTitle();
   }
 
@@ -908,9 +927,14 @@
     const foot = el("div", { class: "dfoot" });
     if (opts.buttons) {
       for (const b of opts.buttons) {
-        const bn = el("button", { text: b.label });
+        const bn = el("button", { text: b.label, title: b.title || null });
         if (b.primary) bn.style.background = "var(--accent)";
-        bn.addEventListener("click", () => { const r = b.action(); if (r !== false) closeModal(); });
+        if (b.disabled) {
+          // 禁用态：不接执行，保留 title 说明原因
+          bn.disabled = true;
+        } else {
+          bn.addEventListener("click", () => { const r = b.action(); if (r !== false) closeModal(); });
+        }
         foot.appendChild(bn);
       }
     }

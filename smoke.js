@@ -122,7 +122,7 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
 const files = [
-  "js/util.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
+  "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
   "js/textops.js", "js/app.js", "js/app2.js"
@@ -158,12 +158,20 @@ assert(SN.shortcuts.groups().length >= 4, "按键表按组呈现");
 
 // 按键命中：修饰键必须完全相等
 // （旧实现里 Ctrl+Shift+F 被 Ctrl+F 吞掉、Ctrl+F2 被 F2 吞掉，都是因为没做这一步）
-const keyEv = (o) => Object.assign({ ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, key: "", preventDefault() { } }, o);
+const keyEv = (o) => Object.assign({
+  ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, key: "", defaultPrevented: false,
+  preventDefault() { this.defaultPrevented = true; }
+}, o);
 const hitOf = (o) => { const it = SN.shortcuts.findEvent(keyEv(o)); return it ? it.id : null; };
 
 // DOM 桩遍历工具（桩只在 children 上建树，textContent 不会自动聚合子节点）
 const walkNodes = (n, fn) => { (n.children || []).forEach(c => { fn(c); walkNodes(c, fn); }); };
-const byClass = (root, cls) => { const out = []; walkNodes(root, n => { if (n.className === cls) out.push(n); }); return out; };
+// 按 class token 匹配（等价于 classList.contains），这样 "iconbt disabled" 也能被 "iconbt" 找到
+const byClass = (root, cls) => {
+  const out = [];
+  walkNodes(root, n => { if (String(n.className).split(/\s+/).indexOf(cls) >= 0) out.push(n); });
+  return out;
+};
 const byText = (root, text) => { let hit = null; walkNodes(root, n => { if (!hit && n.textContent === text) hit = n; }); return hit; };
 const clickableByText = (root, text) => {
   let hit = null;
@@ -404,6 +412,77 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     SN.dlg.find("find");
     assert(calledFind === 1, "Ctrl+F 在大文件上仍走本文件分块搜索");
     b1.bigFind = b1Find;
+
+    // ============ 视图能力表：菜单/工具栏/快捷键按能力置灰（js/viewcaps.js） ============
+    {
+      const textDoc = { kind: "text" }, bigDoc = { kind: "big" }, hexDoc = { kind: "hex" };
+      assert(SN.caps.can("save", textDoc) && SN.caps.can("undo", textDoc) && SN.caps.can("view", textDoc), "文本视图能力齐全");
+      assert(!SN.caps.can("save", bigDoc) && !SN.caps.can("edit", bigDoc) && !SN.caps.can("undo", bigDoc), "大文本视图不支持保存/编辑/撤销");
+      assert(SN.caps.can("find", bigDoc) && SN.caps.can("mark", bigDoc) && SN.caps.can("gotoLine", bigDoc) && SN.caps.can("exportBytes", bigDoc), "大文本视图仍支持查找/标记/跳转行/导出");
+      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc) && !SN.caps.can("statusPos", bigDoc), "大文本视图不支持书签/视图开关/选中哈希/行列定位");
+      assert(SN.caps.can("exportBytes", hexDoc) && !SN.caps.can("find", hexDoc), "Hex 视图只支持导出原始字节");
+      assert(SN.caps.reason("save", bigDoc) === "大文本只读视图不支持保存/另存为", "统一原因文案，实际=" + SN.caps.reason("save", bigDoc));
+      assert(SN.caps.reason("save", textDoc) === "", "可用时原因为空");
+
+      SN.app.activeId = b1.id;
+      SN.refreshMenus();
+      const menubarNode = documentStub.querySelector("#menubar");
+      const saveItem = byText(menubarNode, "保存").parent;
+      assert(saveItem.classList.contains("disabled"), "大文件下菜单「保存」置灰");
+      assert(String(saveItem.title).indexOf("大文本只读视图不支持保存") === 0, "置灰项 tooltip 说明原因，实际=" + saveItem.title);
+      assert(!byText(menubarNode, "查找…").parent.classList.contains("disabled"), "大文件下「查找…」仍可用");
+      assert(!byText(menubarNode, "全部标记(Mark All)").parent.classList.contains("disabled"), "大文件下「全部标记」仍可用");
+      const tbBtns = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      const tbSave = tbBtns.filter(b => String(b.title || "").indexOf("保存") === 0)[0];
+      const tbFind = tbBtns.filter(b => String(b.title || "").indexOf("查找") === 0)[0];
+      assert(tbSave && tbSave.className.indexOf("disabled") >= 0, "大文件下工具栏「保存」置灰");
+      assert(tbFind && tbFind.className.indexOf("disabled") < 0, "大文件下工具栏「查找」仍可用");
+      assert(documentStub.querySelector("#posLabel").textContent.indexOf("大文本只读视图不支持行列定位信息") === 0,
+        "状态栏不再显示陈旧行列，实际=" + documentStub.querySelector("#posLabel").textContent);
+      assert(documentStub.querySelector("#eolSel").disabled === true, "行尾选择器在只读视图禁用");
+
+      // 快捷键：能力不足时不执行、不静默，且仍 preventDefault（挡住浏览器默认行为）
+      const toasts = [];
+      const savedToast = SN.toast, savedSave = SN.cmd.save;
+      let saved = 0;
+      SN.toast = (m) => toasts.push(m);
+      SN.cmd.save = () => { saved++; };
+      const evSave = keyEv({ ctrlKey: true, key: "s" });
+      const blocked = SN.shortcuts.dispatch(evSave);
+      assert(blocked && blocked.blocked === true && saved === 0, "大文件下 Ctrl+S 不执行保存");
+      assert(evSave.defaultPrevented === true, "被拦时仍 preventDefault（否则会弹出浏览器另存为）");
+      assert(toasts.length === 1 && toasts[0].indexOf("大文本只读视图不支持保存") === 0, "给出统一提示，实际=" + toasts.join("|"));
+      SN.shortcuts.dispatch(keyEv({ key: "F3" }));      // 大文件支持查找：应照常执行、不提示
+      assert(toasts.length === 1, "可用快捷键不产生提示");
+      assert(SN.shortcuts.available("find.open", b1) && !SN.shortcuts.available("file.save", b1), "available() 与能力表一致");
+      SN.app.activeId = d0.id;
+      assert(SN.shortcuts.dispatch(keyEv({ ctrlKey: true, key: "s" })) && saved === 1, "文本视图下 Ctrl+S 正常执行");
+      SN.cmd.save = savedSave;
+      SN.toast = savedToast;
+
+      // 哈希面板：只读视图下「计算选中文本」禁用并说明（原先会算出空串的哈希）
+      SN.app.activeId = b1.id;
+      SN.tool.hash();
+      const hm = documentStub.querySelector("#modalHost");
+      assert(!clickableByText(hm, "计算选中文本"), "只读视图下「计算选中文本」不可点击");
+      let hashBtn = null;
+      walkNodes(hm, n => { if (!hashBtn && n.textContent === "计算选中文本") hashBtn = n; });
+      assert(hashBtn && hashBtn.disabled === true, "「计算选中文本」为禁用态");
+      assert(String(hashBtn.title).indexOf("大文本只读视图不支持") === 0, "禁用按钮带原因，实际=" + hashBtn.title);
+      SN.closeModal();
+
+      // 快捷键一览同样标注当前视图不可用的键
+      SN.dlg.shortcuts();
+      const texts = [];
+      walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
+      const allText = texts.join("|");
+      assert(allText.indexOf("Ctrl+S（大文本只读视图不支持保存/另存为）") >= 0, "一览标注不可用的 Ctrl+S");
+      assert(allText.indexOf("Ctrl+H（大文本只读视图不支持替换）") >= 0, "一览标注不可用的 Ctrl+H");
+      assert(allText.indexOf("Ctrl+F（") < 0, "可用的 Ctrl+F 不加标注");
+      SN.closeModal();
+      SN.app.activeId = d0.id;
+      SN.refreshMenus();
+    }
 
     // 大文件单文件搜索（bigtext 分块检索 → showBigResults）也必须落到同一套可折叠分组
     SN.app.activeId = b1.id;

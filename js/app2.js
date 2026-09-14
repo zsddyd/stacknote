@@ -827,10 +827,17 @@
   }
 
   tool.hash = function () {
+    // 选中文本哈希依赖编辑器：大文件/Hex 没有编辑器，原先会静默取空串，
+    // 算出一个「格式正常但内容错误」的哈希值——这里禁用该按钮并写明原因（calc 内再兜底一次）。
+    const selWhy = SN.caps ? SN.caps.reason("hashSelection", SN.activeDoc()) : "";
     SN.openModal({
       title: "MD5 / SHA 计算",
       width: "600px",
-      buttons: [{ label: "选择文件…", action: () => $("#hashFile").click() }, { label: "计算选中文本", primary: true, action: () => calc("sel") }, { label: "关闭", action: () => { } }],
+      buttons: [
+        { label: "选择文件…", action: () => $("#hashFile").click() },
+        { label: "计算选中文本", primary: true, disabled: !!selWhy, title: selWhy, action: () => calc("sel") },
+        { label: "关闭", action: () => { } }
+      ],
       onOpen(b) {
         const algo = el("select", { id: "hashAlgo" });
         SN.HASH_ALGOS.forEach(a => algo.appendChild(el("option", { value: a, text: a.toUpperCase() })));
@@ -845,8 +852,13 @@
           let data;
           if (mode === "sel") {
             const ed = SN.activeEditor();
-            const t = ed ? ed.selectedText() || ed.text : "";
-            data = new TextEncoder().encode(t);
+            if (!ed) {
+              const why = SN.caps ? SN.caps.reason("hashSelection", SN.activeDoc()) : "当前视图不支持选中文本哈希";
+              $("#hashOut").value = why + "；请用「选择文件…」对文件计算。";
+              setMsg(why);
+              return;
+            }
+            data = new TextEncoder().encode(ed.selectedText() || ed.text);
           } else data = new Uint8Array(0);
           finishHash(data);
         };
@@ -1144,7 +1156,9 @@ SN.openModal({
           g.items.forEach(it => {
             const tr = el("tr");
             tr.appendChild(el("td", { text: it.label }));
-            tr.appendChild(el("td", { text: it.accel || "—" }));
+            // 标出当前视图下不可用的键（能力来自 js/viewcaps.js），与菜单置灰同一判据
+            const why = SN.shortcuts.blockedReason(it, SN.activeDoc());
+            tr.appendChild(el("td", { text: (it.accel || "—") + (why ? "（" + why + "）" : "") }));
             tbl.appendChild(tr);
           });
           b.appendChild(tbl);

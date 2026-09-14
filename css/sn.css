@@ -64,7 +64,8 @@ label{user-select:none}
 .mi .accel{margin-left:auto;color:var(--text-weak);font-size:11px}
 .mi:hover .accel{color:#eee}
 .mi.sep{border-top:1px solid var(--border);margin:3px 4px;padding:0}
-.mi.disabled{opacity:.4;pointer-events:none}
+.mi.disabled{opacity:.4;cursor:not-allowed}
+.iconbt.disabled{opacity:.45;cursor:not-allowed}
 .mi .caret{margin-left:6px}
 .submenu-pos{left:100%;top:-1px}
 
