@@ -1,35 +1,24 @@
 :root{
   --accent:#FAAA3C;            /* 选中标签顶条/主强调 */
-  --border:#C0DCF2;
-  --btn-bg:#E1E1E1;
-  --btn-hover-a:#F2F9FF; --btn-hover-b:#DAEFFF;
-  --selection:#00CCFF;
-  --panel:#F0F0F0;
+  --border:#D1D1D1;
+  --btn-bg:#E0E0E0;
+  --btn-hover-a:#FFFFFF; --btn-hover-b:#E0E0E0;
+  --selection:#B27326;
+  --panel:#EDEDED;
   --panel2:#FFFFFF;
   --text:#000;
-  --text-weak:#555;
-  --hl-row:#fff7e0;
-  /* 编辑器主题（由 themes.js 写入） */
+  --text-weak:#6B6B6B;
+  --hl-row:#FFEBCB;
+  --hlw:#FFEB3B;
+  --tab-bg:#E6E6E6; --tab-bg-active:#FFFFFF;
+  --danger:#C0392B;
+  /* 以下变量由 themes.js 按主题写入 <html> 内联样式；这里的值只是首屏兜底（= Default 主题） */
   --ed-bg:#FFFFFF; --ed-fg:#000000;
   --ed-line-num:#808080; --ed-gutter-bg:#f0f0f0;
   --ed-caret:#000;
   --ed-selection:rgba(0,204,255,.30);
   --ed-active-line:rgba(0,0,0,.04);
   --ed-fold-fg:#888;
-}
-body[data-appskin="dark"]{
-  --border:#3a3f47;
-  --btn-bg:#3a3f47;
-  --btn-hover-a:#454c57; --btn-hover-b:#2f353d;
-  --selection:#0f6f9e;
-  --panel:#26282c;
-  --panel2:#2d3035;
-  --text:#e6e6e6;
-  --text-weak:#9a9a9a;
-  --hl-row:#3a3520;
-  --ed-gutter-bg:#26282c;
-  --ed-selection:rgba(0,204,255,.22);
-  --ed-active-line:rgba(255,255,255,.05);
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -85,13 +74,13 @@ label{user-select:none}
 #tabbar{display:flex;align-items:center;background:var(--panel);border-bottom:1px solid var(--border);min-height:30px}
 #tabstrip{display:flex;overflow-x:auto;flex:1}
 .tab{display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 10px;cursor:pointer;
-  border-right:1px solid var(--border);background:rgb(224,224,224);min-width:80px;max-width:220px;
-  white-space:nowrap;color:var(--text)}
-.tab.active{background:var(--panel2);box-shadow:inset 0 3px 0 var(--accent)}
+  border-right:1px solid var(--border);background:var(--tab-bg);min-width:80px;max-width:220px;
+  white-space:nowrap;color:var(--text-weak)}
+.tab.active{background:var(--tab-bg-active);color:var(--text);box-shadow:inset 0 3px 0 var(--accent)}
 .tab .ttitle{overflow:hidden;text-overflow:ellipsis}
-.tab .dirty{color:#d33;font-weight:bold}
+.tab .dirty{color:var(--danger);font-weight:bold}
 .tab .tx{margin-left:3px;color:var(--text-weak)}
-.tab .tx:hover{color:#c00}
+.tab .tx:hover{color:var(--danger)}
 #newTabBt{margin:0 4px;border:0;background:none;font-size:16px}
 
 #editorZone{flex:1;position:relative;min-height:0;background:var(--ed-bg)}

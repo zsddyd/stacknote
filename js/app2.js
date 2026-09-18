@@ -1056,7 +1056,7 @@
           "编码识别与转码(写)",
           "查找替换 / 正则 / 标记 / 书签",
           "行操作 / 大小写 / 空白",
-          "18 套编辑器主题 + 明暗皮肤",
+          "15 套主题（编辑区 + 界面配色一体）",
           "会话恢复",
           "MD5/SHA、XML/JSON 格式化",
           "列块编辑、Markdown 预览、插件（JS 脚本）"
@@ -1103,22 +1103,23 @@
 
   // ================= 选项 =================
   dlg.options = function () {
-        let saveAllFn;
+        let saveAllFn, revertFn, saved = false;
 SN.openModal({
       title: "选项",
       width: "620px",
       buttons: [{ label: "保存", primary: true, action: () => saveAllFn() }, { label: "取消", action: () => { } }],
+      // × / Esc / 点遮罩关闭也走还原：选项里的下拉是即时预览的，关掉对话框不该留在预览态
+      onClose: () => revertFn(),
       onOpen(b) {
         const s = app.settings;
-        const skinSel = sel("skinSel", SN.APP_SKINS.map(x => [x.id, x.name]), s.appSkin);
+        // 下拉是即时预览的，记下打开时的选择，取消时好还原
+        const keepTheme = s.editorTheme;
         const themeSel = sel("themeSel", SN.EDITOR_THEMES.map(t => [t.id, t.name]), s.editorTheme);
         // 显式同步当前值（确保重新打开时下拉框反映已保存的设置）
         themeSel.value = s.editorTheme;
-        skinSel.value = s.appSkin;
         themeSel.addEventListener("change", () => { SN.applyEditorTheme(themeSel.value); });
-        skinSel.addEventListener("change", () => { SN.applyAppSkin(skinSel.value); });
-        b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "界面皮肤" }), skinSel]));
-        b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "编辑器主题" }), themeSel]));
+        b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "主题" }), themeSel]));
+        b.appendChild(el("div", { class: "hint", text: "一套主题同时决定编辑区与界面配色（菜单栏/工具栏/标签栏/状态栏/对话框），不支持混搭；下拉即时预览，取消则还原。" }));
         b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "Tab 宽度" }), numIn("optTab", s.tabWidth, 1, 16)]));
         const boxes = [
           chk("optExpand", "Tab 使用空格", s.expandTab),
@@ -1136,7 +1137,6 @@ SN.openModal({
         function chk(id, label, v) { return el("label", {}, [el("input", { type: "checkbox", id, checked: v }), " " + label]); }
         saveAllFn = function () {
           const s2 = app.settings;
-          s2.appSkin = $("#skinSel").value;
           s2.editorTheme = $("#themeSel").value;
           s2.tabWidth = parseInt($("#optTab").value, 10) || 4;
           s2.expandTab = !!$("#optExpand") && $("#optExpand").checked;
@@ -1144,12 +1144,16 @@ SN.openModal({
           s2.autoSave = !!$("#optAuto") && $("#optAuto").checked;
           s2.wordDblHighlight = !!$("#optWord") && $("#optWord").checked;
           s2.bigThresholdMB = parseInt($("#optBig").value, 10) || 2;
-          SN.applyAppSkin(s2.appSkin);
           SN.applyEditorTheme(s2.editorTheme);
           SN.saveSettings();
           SN.refreshMenus();
           setMsg("选项已保存");
+          saved = true;
         }
+        revertFn = function () {
+          if (saved) return;   // 已保存就不还原（保存后 closeModal 也会触发 onClose）
+          SN.applyEditorTheme(keepTheme);
+        };
       }
     });
   };
@@ -1167,13 +1171,14 @@ SN.openModal({
           card.appendChild(el("div", { text: t.bg + " / " + (t.font || ""), style: "font-size:10px;opacity:.85;font-family:monospace" }));
           card.addEventListener("click", () => {
             SN.applyEditorTheme(t.id);
+            // 同步进 app.settings，否则「点了卡片」只改了预览、没有真正落盘
+            app.settings.editorTheme = t.id;
             app.docs.forEach(dd => { if (dd.editor) dd.editor.render(); });
             SN.saveSettings();
           });
           grid.appendChild(card);
         }
         b.appendChild(grid);
-        b.appendChild(el("div", { class: "hint", text: "共 18 套（Default / Blue light / lavender / misty rose / yellow rice 为浅色，其余为深色系）。点击卡片即时生效。" }));
       }
     });
   };

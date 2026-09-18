@@ -14,7 +14,6 @@
   app.pendingOpenMode = "auto";
 
   const SETTINGS_DEFAULT = {
-    appSkin: "light",
     editorTheme: "default",
     tabWidth: 4,
     expandTab: true,
@@ -967,15 +966,18 @@
     mask.appendChild(dlgEl);
     mask.addEventListener("click", (e) => { if (e.target === mask) closeModal(); });
     host.appendChild(mask);
-    modal = { mask, body, el: dlgEl, host };
+    modal = { mask, body, el: dlgEl, host, onClose: opts.onClose };
     if (opts.onOpen) opts.onOpen(body);
     return modal;
   }
   function closeModal() {
     if (modal) {
+      const m = modal;
       modal.host.classList.remove("show");
       modal.mask.remove();
       modal = null;
+      // 先清空 modal 再回调，避免 onClose 里再次 closeModal 造成递归
+      if (m.onClose) m.onClose();
     }
   }
   window.closeModal = closeModal;
@@ -1031,7 +1033,6 @@
     // 旧版本默认值 100MB 会绕过大文本虚拟视图，自动修正为新默认 2MB
     if (app.settings.bigThresholdMB === 100) app.settings.bigThresholdMB = 2;
     app.curMarkColor = app.MARK_COLORS[app.settings.markColorIdx || 0] || app.MARK_COLORS[0];
-    SN.applyAppSkin(app.settings.appSkin);
     SN.applyEditorTheme(app.settings.editorTheme);
     loadUserSettings();
 

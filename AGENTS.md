@@ -6,7 +6,7 @@ StackNote 是一款**零依赖、零构建**的纯前端多标签文本编辑器
 
 - `index.html` —— 唯一入口；**`<script>` 顺序即模块加载顺序**，`window.SN` 没有加载器，新增模块必须按依赖从底层到上层排列（`util.js` → … → `app.js` / `app2.js` 最后），顺序错会导致运行时报错。
 - `js/` —— 一个文件一个关注点：`util.js`、`themes.js`、`encoding.js`、`editor.js`、`bigtext.js`、`app.js`、`app2.js` 等。每个文件都是 `"use strict";` + IIFE，通过共享命名空间 `window.SN` 暴露能力。
-- `css/sn.css` —— 全部样式；界面亮/暗皮肤与编辑器主题通过 CSS 自定义属性实现。
+- `css/sn.css` —— 全部样式；主题（编辑区 + 界面一体，无独立皮肤）通过 CSS 自定义属性实现。
 - `smoke.js` —— Node（≥ 16）启动冒烟测试：加载全部站点 JS 并执行 `boot()`。
 - `manifest.webmanifest` —— PWA 清单。
 - `js/version.js` —— 版本号唯一来源与运行时常量（见「版本号规则」）。
