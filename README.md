@@ -54,7 +54,7 @@ node smoke.js
 ### 编码/语言/主题
 - 语言菜单（按首字母分组 + XML/YAML/TXT/用户自定义语言）
 - 自定义语言（名称/后缀/关键字，持久化）
-- 18 套编辑器主题 + 界面浅/暗皮肤
+- 15 套主题（含 One Dark Pro），每套自带界面配色（菜单栏/工具栏/标签栏/状态栏），不支持主题与界面混搭
 
 ### 工具 / 其它
 - JSON/XML 格式化、MD5/SHA-1/256/512 计算（文件或选中文本）
@@ -96,11 +96,11 @@ icons/icon-192.png     PWA 图标
 icons/icon-512.png     PWA 图标
 icons/icon-maskable-512.png  PWA maskable 图标（满幅橙底，内容收在 80% 安全圆内）
 icons/stacknote-icon.svg     图标矢量母版（大尺寸版的设计源，改完重新导出上面 4 个 PNG）
-css/sn.css             全部样式（CSS 变量承载明暗皮肤与主题色）
+css/sn.css             全部样式（CSS 变量承载主题色，在 :root 给出首屏兜底值）
 js/util.js             基础工具/事件总线
 js/viewcaps.js         视图能力表（文本/大文本只读/Hex 各支持哪些功能，菜单与快捷键据此置灰）
 js/shortcuts.js        快捷键唯一来源（菜单提示/按键分发/一览对话框同源，支持改键覆盖）
-js/themes.js           18 套编辑器主题 + 明暗皮肤
+js/themes.js           15 套主题（含 One Dark Pro）：编辑区 + 界面配色一体，界面变量统一由 chromeOf 推导
 js/langdefs.js         语言表（关键词/后缀/注释风格）
 js/highlight.js        轻量语法着色 + 标记渲染
 js/encoding.js         编码探测/解码/编码写出

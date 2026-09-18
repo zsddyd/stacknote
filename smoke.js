@@ -304,6 +304,50 @@ assert(hitOf({ ctrlKey: true, key: "f" }) === null, "覆盖后旧键失效");
 SN.shortcuts.resetOverrides();
 assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, key: "f" }) === "find.open", "恢复默认");
 
+// 主题即一切：一套主题同时写编辑区变量与界面变量，不再有独立的界面皮肤
+assert(SN.EDITOR_THEMES.length === 15, "编辑器主题共 15 套");
+assert(SN.EDITOR_THEMES.some(t => t.id === "onedarkpro"), "编辑器主题表含 onedarkpro");
+assert(SN.getTheme("onedarkpro").name === "One Dark Pro", "主题 id/名称均为 One Dark Pro");
+assert(SN.APP_SKINS === undefined && SN.applyAppSkin === undefined, "界面皮肤概念已移除");
+// 老用户保存的是已删除主题的 id 时，必须安全回落到 Default，而不是白屏/报错
+assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id === "default", "已删除主题 id 回落到 Default");
+{
+  const st = documentStub.documentElement.style;
+  const t = SN.getTheme("onedarkpro");
+  assert(t.light === false && t.bg === "#282C34" && t.fg === "#ABB2BF", "One Dark Pro 底色/前景");
+  SN.applyEditorTheme("onedarkpro");
+  assert(st["--ed-bg"] === "#282C34" && st["--ed-caret"] === "#ABB2BF", "One Dark Pro 编辑器底色生效");
+  assert(st["--tok-key"] === "#C678DD" && st["--tok-str"] === "#98C379" && st["--tok-num"] === "#D19A66" && st["--tok-fn"] === "#61AFEF",
+    "One Dark Pro 语法色取自 One Dark 色盘");
+  // 主题自带的覆盖值优先于「按亮暗推导」的默认值
+  assert(st["--ed-gutter-bg"] === "#282C34" && st["--ed-line-num"] === "#495162" && st["--ed-active-line"] === "#2C313C",
+    "One Dark Pro 行号槽/行号/当前行用主题覆盖值");
+  // 界面变量（菜单栏/工具栏/标签栏/状态栏）同属这套主题，且一律来自 chromeOf 的统一推导
+  assert(t.ui === undefined, "One Dark Pro 不再手写界面变量");
+  const ui = SN.chromeOf(t);
+  assert(st["--panel"] === ui["--panel"] && st["--border"] === ui["--border"] && st["--accent"] === ui["--accent"],
+    "One Dark Pro 界面变量来自统一推导");
+  assert(st["--panel"] !== t.bg, "界面面板与编辑区底色按统一规则拉开一档（不再是同色手写值）");
+  SN.applyEditorTheme("monokai");
+  assert(st["--ed-line-num"] === "#6a6a6a" && st["--tok-key"] === "#66D9EF", "未带覆盖的主题仍按默认推导并回落到 Monokai 色盘");
+  assert(st["--panel"] !== "#282C34" && st["--accent"] === "#A6E22E", "换成 Monokai 后界面变量跟着换");
+  SN.applyEditorTheme("default");
+  assert(st["--ed-bg"] === "#FFFFFF" && st["--text"] === "#000000" && st["--panel"] === "#ededed", "Default 是浅色主题：界面也随之回到浅色");
+}
+// 每套主题都要给全界面变量，不能有漏项（漏项会退回 :root 的浅色兜底，深色主题就会出现花屏）
+{
+  const need = Object.keys(SN.chromeOf(SN.getTheme("default")));
+  assert(need.length >= 15, "界面变量清单齐全，实际 " + need.length + " 项");
+  for (const t of SN.EDITOR_THEMES) {
+    const ui = SN.chromeOf(t);
+    const miss = need.filter(k => !ui[k]);
+    assert(miss.length === 0, "主题 " + t.id + " 缺少界面变量：" + miss.join(","));
+    assert(/^#[0-9a-fA-F]{6}$/.test(ui["--panel"]) && /^#[0-9a-fA-F]{6}$/.test(ui["--text"]),
+      "主题 " + t.id + " 的面板/前景应为具体色值");
+    assert(String(ui["--selection"]).length > 0, "主题 " + t.id + " 有选中色");
+  }
+}
+
 // 模块加载后 app2 已自动触发 boot（async），这里等待其完成
 (async function () {
   for (let i = 0; i < 100 && !SN.app.settings; i++) await new Promise(r => setTimeout(r, 10));
@@ -337,6 +381,42 @@ assert(SN.shortcuts.accelOf("find.open") === "Ctrl+F" && hitOf({ ctrlKey: true, 
     assert(d0.enc === "utf8bom", "convertTo");
     SN.dlg.about();
     SN.closeModal();
+    // 「主题与语法样式」点卡片要真正落盘（曾只改预览：themes.js 写 SN.settings，保存读 app.settings）
+    const odpPanel = SN.chromeOf(SN.getTheme("onedarkpro"))["--panel"];
+    SN.dlg.themeStyle();
+    let odpCard = null;
+    walkNodes(documentStub.querySelector("#modalHost"), n => {
+      if (!odpCard && n["data-id"] === "onedarkpro") odpCard = n;
+    });
+    assert(odpCard && odpCard.handlers.click && odpCard.handlers.click.length, "主题卡片渲染且可点击");
+    SN.app.settings.editorTheme = "default";
+    odpCard.handlers.click[0]();
+    assert(SN.app.settings.editorTheme === "onedarkpro", "点主题卡片写入 app.settings 并落盘");
+    assert(documentStub.documentElement.style["--panel"] === odpPanel, "点主题卡片同时切换界面配色");
+    SN.closeModal();
+    // 选项里的下拉是即时预览：按「取消」应还原成打开前的主题，而不是留在预览态
+    SN.app.settings.editorTheme = "default";
+    SN.applyEditorTheme("default");
+    SN.dlg.options();
+    const themeSel = byIdIn(documentStub.querySelector("#modalHost"), "themeSel");
+    assert(themeSel, "选项对话框渲染出主题下拉");
+    assert(byIdIn(documentStub.querySelector("#modalHost"), "skinSel") === null, "选项对话框已无界面皮肤下拉");
+    themeSel.value = "onedarkpro";
+    themeSel.handlers.change[0]();
+    assert(documentStub.documentElement.style["--panel"] === odpPanel, "选项里选 One Dark Pro 即时预览界面");
+    const cancelBt = clickableByText(documentStub.querySelector("#modalHost"), "取消");
+    cancelBt.handlers.click[0]();
+    assert(documentStub.documentElement.style["--panel"] === "#ededed", "取消选项后界面还原成 Default 配色");
+    assert(SN.app.settings.editorTheme === "default", "取消选项不改动已保存的设置");
+    // 保存路径：$("#...") 在桩里走 registry，先把控件值写进去再点「保存」
+    SN.dlg.options();
+    documentStub.querySelector("#themeSel").value = "onedarkpro";
+    documentStub.querySelector("#optTab").value = "4";
+    documentStub.querySelector("#optBig").value = "2";
+    clickableByText(documentStub.querySelector("#modalHost"), "保存").handlers.click[0]();
+    assert(SN.app.settings.editorTheme === "onedarkpro", "保存后主题落盘");
+    assert(documentStub.documentElement.style["--panel"] === odpPanel, "保存后 One Dark Pro 界面仍生效（保存不回滚）");
+    SN.applyEditorTheme("default");
   }
   // 多组“关键词+颜色”标记可共存
   if (d0 && d0.editor) {
