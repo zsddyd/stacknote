@@ -56,6 +56,9 @@ function makeNode(tag) {
     get firstChild() { return this.children[0] || null; }
   };
   Object.defineProperty(node, "parent", { get() { return node._parent; }, set(v) { node._parent = v; } });
+  // 标准 DOM 属性名是 parentNode；桩早期只提供了 parent，导致用 parentNode 往上找祖先的代码
+  //（例如大文件视图的 insidePage / 行节点回溯）在桩里永远走不到底、相关断言失真
+  Object.defineProperty(node, "parentNode", { get() { return node._parent; }, set(v) { node._parent = v; } });
   // 与浏览器一致：把 textContent 设为 "" 会清空子节点。
   // 不少代码靠 `container.textContent = ""` 清空后重建列表（结果面板/停靠窗），
   // 桩若只记属性不清子节点，跨次渲染会累积出陈旧节点、断言随之失真。
@@ -125,7 +128,7 @@ const files = [
   "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
-  "js/textops.js", "js/app.js", "js/app2.js"
+  "js/textops.js", "js/menu.js", "js/app.js", "js/app2.js"
 ];
 for (const f of files) {
   const code = fs.readFileSync(path.join(__dirname, f), "utf8");
@@ -468,7 +471,8 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
   {
     const handlers = documentStub.handlers.keydown || [];
-    assert(handlers.length === 1, "已注册全局 keydown 监听，数量 = " + handlers.length);
+    // 两个：① 快捷键表分发（js/app.js bindShortcuts）② 右键菜单键盘导航（js/menu.js，闭菜单时立即返回）
+    assert(handlers.length === 2, "已注册全局 keydown 监听（快捷键分发 + 右键菜单导航），数量 = " + handlers.length);
     const saved = SN.dlg.find;
     const seen = [];
     SN.dlg.find = (o) => seen.push(o && o.scope);
@@ -664,7 +668,9 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(SN.caps.can("save", textDoc) && SN.caps.can("undo", textDoc) && SN.caps.can("view", textDoc), "文本视图能力齐全");
       assert(!SN.caps.can("save", bigDoc) && !SN.caps.can("edit", bigDoc) && !SN.caps.can("undo", bigDoc), "大文本视图不支持保存/编辑/撤销");
       assert(SN.caps.can("find", bigDoc) && SN.caps.can("mark", bigDoc) && SN.caps.can("gotoLine", bigDoc) && SN.caps.can("exportBytes", bigDoc), "大文本视图仍支持查找/标记/跳转行/导出");
-      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc) && !SN.caps.can("statusPos", bigDoc), "大文本视图不支持书签/视图开关/选中哈希/行列定位");
+      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc), "大文本视图不支持书签/视图开关/选中哈希");
+      // 行列定位（statusPos）已补进大文本视图：语义是「选中起点行/列」或「视口首行」，只涉及可视行
+      assert(SN.caps.can("statusPos", bigDoc) && !SN.caps.can("statusPos", hexDoc), "大文本支持行列定位，Hex 仍不支持");
       assert(SN.caps.can("exportBytes", hexDoc) && !SN.caps.can("find", hexDoc), "Hex 视图只支持导出原始字节");
       assert(SN.caps.reason("save", bigDoc) === "大文本只读视图不支持保存/另存为", "统一原因文案，实际=" + SN.caps.reason("save", bigDoc));
       assert(SN.caps.reason("save", textDoc) === "", "可用时原因为空");
@@ -682,8 +688,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const tbFind = tbBtns.filter(b => String(b.title || "").indexOf("查找") === 0)[0];
       assert(tbSave && tbSave.className.indexOf("disabled") >= 0, "大文件下工具栏「保存」置灰");
       assert(tbFind && tbFind.className.indexOf("disabled") < 0, "大文件下工具栏「查找」仍可用");
-      assert(documentStub.querySelector("#posLabel").textContent.indexOf("大文本只读视图不支持行列定位信息") === 0,
-        "状态栏不再显示陈旧行列，实际=" + documentStub.querySelector("#posLabel").textContent);
+      // 行列定位已补进大文本视图：切换文档后会写该视图自己的位置信息，而不是留上一个文档的旧值
+      const posBig = String(documentStub.querySelector("#posLabel").textContent);
+      assert(/^Ln:\d+（视口首行）/.test(posBig) || /^块:\d+\//.test(posBig),
+        "切到大文件后状态栏显示该视图自己的行列信息（不再是陈旧值），实际=" + posBig);
       assert(documentStub.querySelector("#eolSel").disabled === true, "行尾选择器在只读视图禁用");
 
       // 快捷键：能力不足时不执行、不静默，且仍 preventDefault（挡住浏览器默认行为）
@@ -795,6 +803,745 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     assert(bigGroups[0].classList.contains("collapsed"), "大文件单文件结果同样可折叠");
     bigHead.handlers.click[0]();
     assert(!bigGroups[0].classList.contains("collapsed"), "大文件结果再次单击可展开");
+  }
+
+  // ============ 右键菜单：宿主委托 / 视图分派 / 能力置灰 / O(1) 与无泄漏（js/menu.js） ============
+  {
+    const ctxBox = () => documentStub.querySelector("#ctxmenu");
+    // 读当前菜单：文本 = 各 span 拼接（含 ☑ 与加速键），disabled = 置灰标记
+    const readMenu = (box) => byClass(box, "mi").map(n => ({
+      node: n,
+      text: (n.children || []).map(c => c.textContent || "").join(""),
+      disabled: SN.menu.hasClass(n, "disabled"),
+      title: n.title || ""
+    }));
+    const pick = (list, key) => list.filter(x => x.text.indexOf(key) >= 0)[0];
+    const fireCtx = (host, target) => {
+      const ev = {
+        clientX: 12, clientY: 24, target, defaultPrevented: false, stopped: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() { this.stopped = true; }
+      };
+      (host.handlers.contextmenu || []).forEach(f => f(ev));
+      return ev;
+    };
+    const fireDoc = (type, target) => {
+      const ev = { target, key: "", preventDefault() { }, stopPropagation() { } };
+      (documentStub.handlers[type] || []).forEach(f => f(ev));
+      return ev;
+    };
+
+    // ① 宿主委托：每个宿主只挂 1 个 contextmenu（不逐项挂监听）
+    const editorZone = documentStub.querySelector("#editorZone");
+    for (const sel of ["#editorZone", "#tabstrip", "#fileList", "#resultView", "#statusbar"]) {
+      const n = (documentStub.querySelector(sel).handlers.contextmenu || []).length;
+      assert(n === 1, sel + " 应只挂 1 个委托 contextmenu，实际 " + n);
+    }
+    SN.menu.bindHosts();   // 幂等：重复调用不得重复挂监听
+    assert((editorZone.handlers.contextmenu || []).length === 1, "bindHosts 幂等，重复调用不重复挂监听");
+    const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    assert(indexHtml.indexOf("js/menu.js") >= 0 && indexHtml.indexOf("js/menu.js") < indexHtml.indexOf("js/app.js"),
+      "index.html 里 js/menu.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
+    assert(/id="ctxmenu"[^>]*role="menu"/.test(indexHtml), "#ctxmenu 声明 role=menu（右键菜单容器语义）");
+
+    // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染
+    const d0 = SN.app.docs.filter(d => d.editor)[0];
+    assert(d0, "存在可编辑文本文档");
+    SN.app.activeId = d0.id;
+    d0.editor.setText("hello world\nfoo bar\nend", [0, 0]);
+    let rendered = 0;
+    const savedRender = d0.editor.render, savedSchedule = d0.editor.scheduleRender;
+    d0.editor.render = () => { rendered++; };
+    d0.editor.scheduleRender = () => { rendered++; };
+    const evText = fireCtx(editorZone, d0.editor.ta);
+    assert(evText.defaultPrevented && evText.stopped, "文本区右键接管原生菜单（preventDefault + stopPropagation）");
+    assert(!ctxBox().classList.contains("hidden"), "右键后菜单可见");
+    const textMenu = readMenu(ctxBox());
+    for (const want of ["撤销", "复制", "清除全部标记", "标记颜色", "大小写转换", "行编辑", "空白字符操作", "书签", "查找…", "跳转行…", "列块编辑…"]) {
+      assert(pick(textMenu, want), "文本右键菜单含「" + want + "」");
+    }
+    assert(!pick(textMenu, "全部标记(Mark All)"), "右键菜单不再给「全部标记」（整体性入口留在顶栏/查找面板）");
+    assert(textMenu.every(x => x.text.indexOf("粘贴") < 0), "右键菜单不含「粘贴」：脚本不读剪贴板，粘贴请用 Ctrl+V");
+    const textMenuItems = textMenu.filter(x => !SN.menu.hasClass(x.node, "sep"));
+    assert(textMenuItems.length > 0 && textMenuItems.every(x => x.node.role === "menuitem"),
+      "右键菜单项带 menuitem 语义（容器声明 role=menu 的配套）");
+    assert(pick(textMenu, "复制").disabled, "无选区时「复制」置灰");
+    assert(rendered === 0, "打开右键菜单不触发编辑器渲染，实际 render 次数=" + rendered);
+    d0.editor.render = savedRender;
+    d0.editor.scheduleRender = savedSchedule;
+
+    // ③ 子菜单：hover/点击展开、调色板勾选、stay+rebuild、逐级关闭
+    const colorRow = pick(textMenu, "标记颜色");
+    colorRow.node.handlers.click[0]({ stopPropagation() { } });
+    let pop = byClass(documentStub.body, "menu-pop")[0];
+    assert(pop, "「标记颜色」点击后展开子菜单（.menu-pop）");
+    const colorItems = readMenu(pop);
+    assert(colorItems.length === SN.app.MARK_COLORS.length, "调色板子菜单项数 = 可用标记颜色数");
+    pick(colorItems, "颜色 2").node.handlers.click[0]({ stopPropagation() { } });
+    assert(SN.app.curMarkColor === SN.app.MARK_COLORS[1], "点选颜色后当前标记色切换");
+    pop = byClass(documentStub.body, "menu-pop")[0];
+    assert(pick(readMenu(pop), "颜色 2").text.indexOf("☑") === 0, "stay+rebuild：子菜单重绘并勾选新颜色");
+    assert(!ctxBox().classList.contains("hidden"), "stay 项不关闭菜单");
+
+    // ③b 选区记忆：右键菜单抢焦点/浏览器折叠光标后，「标记颜色」仍要作用于用户刚才选的那段文本
+    //     （修复前：hasSelection() 已是 false → kw 为空 → 既不标记也不提示，观感就是「点了没反应」）
+    {
+      const ed = d0.editor;
+      SN.menu.closeCtx();
+      SN.cmd.clearMarksAll();        // 前面段落已在这份编辑器上标过 alpha/beta，先清空让断言确定
+      ed.setText("alpha beta alpha\n", [0, 5]);
+      ed.rememberSelection();        // 真实浏览器里由 select/mouseup 触发（桩不派发真实事件）
+      ed.ta.setSelectionRange(5, 5);  // 模拟「右键/抢焦点把光标折叠掉」
+      assert(ed.hasSelection() === false, "前提：当前选区已被折叠");
+      assert(ed.effectiveSelectedText() === "alpha", "折叠后仍能取回最近一次有效选区文本");
+      fireCtx(editorZone, ed.ta);
+      const menuSel = readMenu(ctxBox());
+      assert(!pick(menuSel, "复制").disabled, "光标被折叠后「复制」仍可用（以记忆的选区为准）");
+      pick(menuSel, "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      const palSel = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+      pick(palSel, "颜色 3").node.handlers.click[0]({ stopPropagation() { } });
+      assert(ed.markRecords.length === 1 && ed.markRecords[0].keyword === "alpha",
+        "右键「标记颜色」把用户刚才选中的词标记了出来，实际=" + JSON.stringify(ed.markRecords.map(r => r.keyword)));
+      assert(ed.markRecords[0].color === SN.app.MARK_COLORS[2], "标记用的是刚点的那个颜色");
+      assert(ed.ta.selectionStart === 0 && ed.ta.selectionEnd === 5,
+        "点颜色时把「打开菜单那一刻」的选区还原回编辑器，实际=" + ed.ta.selectionStart + "," + ed.ta.selectionEnd);
+
+      // 更危险的退化：选区被折叠后走「大小写转换」，绝不能把整篇都改掉
+      SN.menu.closeCtx();
+      ed.clearLastSelection();
+      ed.setText("alpha beta\n", [0, 5]);
+      ed.rememberSelection();          // 用户选了 "alpha"
+      ed.ta.setSelectionRange(5, 5);   // 右键把它折叠
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "大小写转换").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "UPPERCASE").node.handlers.click[0]({ stopPropagation() { } });
+      assert(ed.text === "ALPHA beta\n",
+        "折叠光标后「大小写转换」仍只作用于菜单打开时的选区（而不是整篇），实际=" + JSON.stringify(ed.text));
+
+      // 真的没有选中内容时必须给出提示，不能再静默
+      SN.menu.closeCtx();
+      ed.clearLastSelection();
+      ed.ta.setSelectionRange(0, 0);
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "颜色 5").node.handlers.click[0]({ stopPropagation() { } });
+      assert(String(documentStub.querySelector("#msgLabel").textContent).indexOf("请先选中") >= 0,
+        "没有选中内容时明确提示而不是静默，实际=" + documentStub.querySelector("#msgLabel").textContent);
+      SN.menu.closeCtx();
+      ed.setText("hello world\nfoo bar\nend", [0, 0]);   // 还原给后续断言
+      // 后续 Esc 段落的前提是「菜单开着、且子菜单也开着」，这里把状态摆回去
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+    }
+
+    const keyHandlers = documentStub.handlers.keydown || [];
+    const esc = () => ({ key: "Escape", target: ctxBox(), preventDefault() { }, stopPropagation() { } });
+    keyHandlers.forEach(f => f(esc()));
+    assert(!byClass(documentStub.body, "menu-pop").length, "Esc 先关闭子菜单");
+    assert(!ctxBox().classList.contains("hidden"), "Esc 第一下只关子菜单");
+    keyHandlers.forEach(f => f(esc()));
+    assert(ctxBox().classList.contains("hidden"), "Esc 第二下关闭右键菜单");
+    assert(d0.editor.ta._focused === true, "Esc 关闭后焦点回到编辑器");
+
+    // hover 展开/收起子菜单（Win32 习惯）：根菜单 hover 子项开、hover 普通项关，子菜单内部不挂 hover
+    fireCtx(editorZone, d0.editor.ta);
+    pick(readMenu(ctxBox()), "大小写转换").node.handlers.mouseenter[0]();
+    const hoveredPop = byClass(documentStub.body, "menu-pop")[0];
+    assert(hoveredPop, "hover 子菜单项即展开子菜单");
+    assert(!(hoveredPop.children[0].handlers.mouseenter), "子菜单内部不挂 hover（否则鼠标移入会自关）");
+    pick(readMenu(ctxBox()), "撤销").node.handlers.mouseenter[0]();
+    assert(!byClass(documentStub.body, "menu-pop").length, "hover 普通项收起子菜单");
+    SN.menu.closeCtx();
+
+    // ④ 关闭路径：点击别处 / 滚动（document 级监听，各 1 个）
+    assert((documentStub.handlers.mousedown || []).length === 1, "document 只挂 1 个 mousedown（关闭右键菜单）");
+    assert((documentStub.handlers.scroll || []).length === 1, "document 只挂 1 个 scroll（关闭右键菜单）");
+    fireCtx(editorZone, d0.editor.ta);
+    fireDoc("mousedown", documentStub.createElement("div"));
+    assert(ctxBox().classList.contains("hidden"), "点击菜单外关闭右键菜单");
+    fireCtx(editorZone, d0.editor.ta);
+    fireDoc("scroll", d0.editor.ta);
+    assert(ctxBox().classList.contains("hidden"), "编辑器滚动关闭右键菜单");
+
+    // ⑤ 大文本 / Hex 视图菜单按能力表收敛
+    const bigDoc = { id: "ctxBig", name: "big.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new TextEncoder().encode("a\nb\n") };
+    SN.menu.openCtx(10, 20, SN.views.of(bigDoc).contextMenu(bigDoc), { doc: bigDoc });
+    const bigMenu = readMenu(ctxBox());
+    for (const want of ["清除全部标记", "标记颜色", "查找…", "跳转行…", "复制选中内容", "导出原始文件", "重命名…"]) {
+      assert(pick(bigMenu, want), "大文本右键菜单含「" + want + "」");
+    }
+    assert(!pick(bigMenu, "全部标记(Mark All)"), "大文本右键菜单不含「全部标记」（点颜色已经标记当前目标）");
+    assert(!pick(bigMenu, "撤销") && !pick(bigMenu, "另存为"), "大文本右键菜单不给编辑/保存入口");
+    assert(pick(bigMenu, "复制选中内容").disabled, "大文本视图无选中时「复制选中内容」置灰");
+    const hexDoc = { id: "ctxHex", name: "x.bin", kind: "hex", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new Uint8Array([0, 1, 2, 3]) };
+    SN.menu.openCtx(10, 20, SN.views.of(hexDoc).contextMenu(hexDoc), { doc: hexDoc });
+    const hexMenu = readMenu(ctxBox());
+    for (const want of ["导出原始文件", "以文本模式重载", "重命名…"]) {
+      assert(pick(hexMenu, want), "Hex 右键菜单含「" + want + "」");
+    }
+    assert(!pick(hexMenu, "查找…") && !pick(hexMenu, "撤销"), "Hex 右键菜单不给查找/编辑入口");
+    assert(SN.caps.can("rename", hexDoc), "Hex 视图能力表含重命名（右键菜单据此提供入口）");
+
+    // ⑥ O(1)：菜单节点数与文档长度无关（3MB 与 3 行完全一致）
+    const edBig = new SN.Editor({ readOnly: false, wrap: false, langId: "txt", zoom: 100 });
+    edBig.setText("x".repeat(3 * 1024 * 1024) + "\n", [0, 0]);
+    const bigTextDoc = { id: "ctx3mb", name: "m3.txt", kind: "text", enc: "utf8", eol: "lf", lang: "txt", content: "", editor: edBig };
+    SN.menu.openCtx(10, 20, SN.views.of(d0).contextMenu(d0, {}), { doc: d0 });
+    const nSmall = byClass(ctxBox(), "mi").length;
+    SN.menu.openCtx(10, 20, SN.views.of(bigTextDoc).contextMenu(bigTextDoc, {}), { doc: bigTextDoc });
+    const nBig = byClass(ctxBox(), "mi").length;
+    assert(nSmall === nBig && nSmall > 10, "菜单节点数与文档长度无关（O(1)），实际 " + nSmall + " vs " + nBig);
+
+    // ⑦ 反复开合不累积监听器（旧实现每次打开都挂一个 document {once:true} 监听）
+    const clickBefore = (documentStub.handlers.click || []).length;
+    const keyBefore = (documentStub.handlers.keydown || []).length;
+    for (let i = 0; i < 3; i++) { SN.menu.closeCtx(); fireCtx(editorZone, d0.editor.ta); }
+    SN.menu.closeCtx();
+    assert((documentStub.handlers.click || []).length === clickBefore, "反复开合不累积 click 监听");
+    assert((documentStub.handlers.keydown || []).length === keyBefore, "反复开合不累积 keydown 监听");
+
+    // ⑧ 文件列表项：与标签栏共用文档菜单；只读视图的「另存为」按能力置灰
+    SN.app.docs.push(hexDoc);
+    const fileList = documentStub.querySelector("#fileList");
+    const li = documentStub.createElement("li");
+    li.dataset.id = d0.id;
+    assert(fireCtx(fileList, li).defaultPrevented, "文件列表项右键接管原生菜单");
+    for (const want of ["关闭当前文档", "重命名…", "重新打开为（当前：文本编辑）"]) {
+      assert(pick(readMenu(ctxBox()), want), "文件列表右键菜单含「" + want + "」");
+    }
+    // 视图切换收进子菜单：三项齐全，且当前所在视图置灰
+    pick(readMenu(ctxBox()), "重新打开为").node.handlers.click[0]({ stopPropagation() { } });
+    const viewSub = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+    for (const want of ["文本编辑", "大文本只读", "二进制(Hex)只读"]) {
+      assert(pick(viewSub, want), "「重新打开为」子菜单含「" + want + "」");
+    }
+    assert(pick(viewSub, "文本编辑").disabled, "当前视图（文本编辑）在子菜单里置灰");
+    SN.menu.closeCtx();
+    li.dataset.id = hexDoc.id;
+    fireCtx(fileList, li);
+    const hexDocMenu = readMenu(ctxBox());
+    assert(pick(hexDocMenu, "另存为…").disabled, "只读视图下文件列表「另存为」置灰");
+    assert(pick(hexDocMenu, "另存为…").title.indexOf("Hex 只读视图不支持保存") === 0,
+      "置灰项说明原因，实际=" + pick(hexDocMenu, "另存为…").title);
+    assert(pick(hexDocMenu, "重新打开为（当前：Hex 只读）"), "Hex 视图的「重新打开为」标题标出当前视图");
+    pick(hexDocMenu, "重新打开为").node.handlers.click[0]({ stopPropagation() { } });
+    const hexViewSub = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+    assert(pick(hexViewSub, "二进制(Hex)只读").disabled, "Hex 视图下「二进制(Hex)只读」置灰（就是当前视图）");
+    assert(!pick(hexViewSub, "文本编辑").disabled && !pick(hexViewSub, "大文本只读").disabled,
+      "Hex 视图可切回文本编辑或大文本只读");
+    SN.menu.closeCtx();
+
+    // ⑨ 结果行/分组头：跳转与左键同源、复制入口齐备（回归此前未覆盖的右键面）
+    const resultView = documentStub.querySelector("#resultView");
+    const row = documentStub.createElement("div");
+    row.className = "res-row";
+    row.dataset.doc = d0.id; row.dataset.start = 0; row.dataset.end = 5; row.dataset.line = 1;
+    const lnn = documentStub.createElement("span"); lnn.className = "lnn"; lnn.textContent = "行 1:";
+    const content = documentStub.createElement("span"); content.textContent = "hello";
+    row.appendChild(lnn); row.appendChild(content);
+    assert(fireCtx(resultView, row).defaultPrevented, "结果行右键接管原生菜单");
+    const rowMenu = readMenu(ctxBox());
+    for (const want of ["跳转到该行", "复制该行文本", "复制行号+文本", "复制全部结果"]) {
+      assert(pick(rowMenu, want), "结果行右键菜单含「" + want + "」");
+    }
+    SN.app.activeId = "none";
+    pick(rowMenu, "跳转到该行").node._activate();
+    assert(SN.app.activeId === d0.id, "「跳转到该行」切到命中文档（与左键点击同源）");
+
+    // ⑩ 状态栏四变体：编码格 / 语言格 / 行尾格 / 其它
+    const statusbar = documentStub.querySelector("#statusbar");
+    const cellWith = (id) => { const n = documentStub.createElement("span"); n.id = id; return n; };
+    assert(fireCtx(statusbar, cellWith("codeLabel")).defaultPrevented, "状态栏右键接管原生菜单");
+    const codeMenu = readMenu(ctxBox());
+    assert(pick(codeMenu, "以编码重新加载") && pick(codeMenu, "转换为编码"), "编码格右键给编码菜单");
+    fireCtx(statusbar, cellWith("langLabel"));
+    assert(pick(readMenu(ctxBox()), "用户自定义语言…"), "语言格右键给语言菜单");
+    fireCtx(statusbar, cellWith("eolSel"));
+    assert(pick(readMenu(ctxBox()), "转为 Unix(LF)"), "行尾格右键给换行符转换菜单");
+    fireCtx(statusbar, cellWith("msgLabel"));
+    const barMenu = readMenu(ctxBox());
+    for (const want of ["工具栏", "文件列表窗口", "查找结果面板", "放大", "缩小", "重置为 100%"]) {
+      assert(pick(barMenu, want), "状态栏通用右键菜单含「" + want + "」");
+    }
+    SN.menu.closeCtx();
+    assert(ctxBox().classList.contains("hidden"), "关闭后 #ctxmenu 归位隐藏");
+
+    // ⑪ 剪贴板工具：优先 clipboard.writeText，缺失/失败时退回 execCommand，全程不抛异常
+    {
+      assert(await SN.menu.copyText("hello") === true, "有 clipboard.writeText 时复制成功");
+      const savedClip = sandbox.navigator.clipboard;
+      sandbox.navigator.clipboard = undefined;
+      assert(await SN.menu.copyText("hello") === false, "无 clipboard 且无 execCommand 时安全失败");
+      sandbox.navigator.clipboard = savedClip;
+    }
+
+    // ⑫ 大文件视图：右键「标记颜色」必须以「打开菜单那一刻的选区」为准
+    //     （修复前：折叠 selectionchange 会把 bigSel 清空 → 永远提示「请先选中要高亮的文本」）
+    {
+      // 造一个走完整 buildPage 流程的大文件文档（pageEl/适配器都齐全）
+      const big = {
+        id: "ctxBigReal", name: "real.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("alpha needle\nbeta line\nneedle two\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      assert(big.pageEl && typeof big.bigSetSelected === "function" && typeof big._bigKeywordAt === "function",
+        "大文件视图注册了「固定右键目标」与「右键落点取词」");
+      const savedGet = sandbox.window.getSelection;
+      big.bigSetSelected("");
+      // 大文件视图的「页」是 .page 里的 .bigview（selectionchange 以它为界判断是否属于本视图）
+      const bigView = big.pageEl.children[0];
+      // 拖选 → 记录
+      sandbox.window.getSelection = () => ({ anchorNode: bigView, isCollapsed: false, toString: () => "needle" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(big.bigSelected() === "needle", "大文件里拖选后记下目标词，实际=" + JSON.stringify(big.bigSelected()));
+      // 右键/菜单抢焦点 → 浏览器报「折叠」，不得因此清空记忆（这条就是本次 bug）
+      sandbox.window.getSelection = () => ({ anchorNode: bigView, isCollapsed: true, toString: () => "" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(big.bigSelected() === "needle", "折叠不再清掉大文件的选区记忆");
+      sandbox.window.getSelection = savedGet;
+
+      big.bigMarks = [];
+      SN.app.activeId = big.id;
+      fireCtx(editorZone, bigView);
+      const bigMenuReal = readMenu(ctxBox());
+      assert(!pick(bigMenuReal, "复制选中内容").disabled, "有目标时大文件菜单「复制选中内容」可用");
+      assert(!pick(bigMenuReal, "标记颜色").disabled, "大文件菜单「标记颜色」可用（requires=mark）");
+      pick(bigMenuReal, "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "颜色 4").node.handlers.click[0]({ stopPropagation() { } });
+      assert(big.bigMarks.length === 1 && big.bigMarks[0].keyword === "needle",
+        "大文件右键「标记颜色」把目标词标记出来，实际=" + JSON.stringify(big.bigMarks));
+      assert(big.bigMarks[0].color === SN.app.MARK_COLORS[3], "标记用的是刚点的那个颜色");
+      SN.menu.closeCtx();
+      // 行号栏改为「每行 .bg-ln 自带底色/分割线 + position:sticky 钉在左侧」：
+      // 素材是行节点自己的，这里断言渲染出来的行确实带这个 class（CSS 规则由下面 ⑬ 静态护栏校验）
+      await new Promise(r => setTimeout(r, 30));   // 等行索引 + 首屏虚拟行渲染
+      const lnCells = byClass(big.pageEl, "bg-ln");
+      assert(lnCells.length > 0, "大文件视图的行号栏由行内 .bg-ln 承担（旧的全高装饰层已移除）");
+      SN.app.docs = SN.app.docs.filter(d => d.id !== big.id);
+    }
+
+    // ⑬ 菜单外观护栏（css/sn.css）：分隔线不得被渲染成「像可选中项」的粗条/高亮条
+    {
+      const css = fs.readFileSync(path.join(__dirname, "css/sn.css"), "utf8");
+      assert(/\.mi:not\(\.sep\):not\(\.disabled\):hover\{/.test(css), "菜单 hover 高亮只给可点击条目");
+      assert(!/(^|\n)\.mi:hover\{/m.test(css), "不再有「所有 .mi 都高亮」的旧规则");
+      assert(/\.mi\.sep\{[^}]*cursor:default/.test(css), "分隔线用默认光标（不再是手型）");
+      assert(/\.mi\.sep\{[^}]*pointer-events:none/.test(css), "分隔线不参与 hover（划过时上一项保持高亮）");
+      assert(/#ctxmenu \.mi\.sep\{padding:0\}/.test(css), "右键菜单里分隔线不带条目内边距（否则会变成粗条）");
+      // 大文件行号栏：底色/分割线必须来自主题变量，横向滚动时必须钉在左侧，且「行号列宽」单一来源
+      // （两边各写一个宽度就是上一版分割线压到首字符的原因）
+      assert(/\.bg-ln\{[^}]*background:var\(--ed-gutter-bg\)/.test(css),
+        "大文件行号栏用主题的行号槽底色（--ed-gutter-bg）");
+      assert(/\.bg-ln\{[^}]*border-right:1px solid var\(--border\)/.test(css),
+        "大文件行号栏与正文之间有 1px 分割线");
+      assert(/\.bg-ln\{[^}]*position:sticky[^}]*left:0/.test(css),
+        "行号栏 position:sticky 钉在左侧：横向滚动查看长行时行号不会跑出视野");
+      assert(/\.bigview\{--bg-ln-w:/.test(css), "行号列宽由 --bg-ln-w 定义（作用域在大文件视图上）");
+      assert(/\.bg-ln\{[^}]*width:var\(--bg-ln-w\)/.test(css), "行号 span 的宽度来自 --bg-ln-w");
+      // 行节点上不能有 overflow:hidden —— 那会让最近裁剪祖先变成行节点，sticky 失效
+      assert(/\.bg-row\{/.test(css) ? !/\.bg-row\{[^}]*overflow:hidden/.test(css) : true,
+        "行节点不能带 overflow:hidden（会让行号的 sticky 失效）");
+      const bigSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
+      assert(bigSrc.indexOf("width:64px") < 0, "bigtext.js 不再硬编码行号列宽：内联 width 会盖掉 CSS 造成错位");
+      assert(bigSrc.indexOf("overflow:hidden") < 0 || bigSrc.indexOf("white-space:pre;overflow:hidden") < 0,
+        "bigtext.js 的行节点不再用 overflow:hidden 裁剪（长行要能横向滚动查看）");
+      assert(/inner\.style\.width = contentWidth\(\)/.test(bigSrc),
+        "内容层宽度由最长行决定（否则长行只会被裁掉、无法左右拖动）");
+    }
+
+    // ⑭ 打开入口统一 + 视图自动识别 + 「重新打开为 …」三向切换
+    {
+      const menubarNode = documentStub.querySelector("#menubar");
+      assert(byText(menubarNode, "打开…"), "文件菜单保留唯一的「打开…」入口");
+      assert(!byText(menubarNode, "以文本模式打开…") && !byText(menubarNode, "以二进制(Hex)打开…"),
+        "文件菜单不再单列强制视图入口（视图改由自动识别 + 打开后「重新打开为」）");
+
+      // 自动识别规则（js/app.js 的 decideKind，经 SN.applyBytesToDoc 暴露）
+      const mkDoc = (id) => ({ id, name: "t", path: "t", eol: "lf", lang: "txt", dirty: false, raw: null, content: "" });
+      const encBytes = (t) => new TextEncoder().encode(t);
+      const bigLen = SN.bigLimitBytes();
+      const small = encBytes("hello\nworld\n");
+      const dA = mkDoc("autoA");
+      SN.applyBytesToDoc(dA, small, "auto", small.length);
+      assert(dA.kind === "text" && dA.readOnly === false, "小文本 → 自动识别为文本编辑");
+      const dB = mkDoc("autoB");
+      // 用更贴近现实的二进制（PNG 头）：注意这条例不是「任何含 NUL 都算二进制」——
+      // 无 BOM 且 NUL 呈 UTF-16 奇偶规律的短样本会被编码探测猜成 utf16le/be，从而按文本打开
+      //（既有规则有意偏向 UTF-16，兜底就是右键「重新打开为 → 二进制(Hex)只读」）
+      const binBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+      SN.applyBytesToDoc(dB, binBytes, "auto", binBytes.length);
+      assert(dB.kind === "hex" && dB.readOnly === true, "含 NUL 的二进制 → 自动识别为 Hex 只读");
+      const dC = mkDoc("autoC");
+      const bigBytes = new Uint8Array(bigLen + 1);
+      bigBytes.fill(0x41);
+      SN.applyBytesToDoc(dC, bigBytes, "auto", bigBytes.length);
+      assert(dC.kind === "big" && dC.readOnly === true && dC.content === "",
+        "超阈值纯文本 → 自动识别为大文本只读，且不整篇解码（content 为空）");
+      const dD = mkDoc("autoD");
+      const u16 = SN.encodeText("hello world\n第二行\n", "utf16le");
+      SN.applyBytesToDoc(dD, u16, "auto", u16.length);
+      assert(dD.kind === "text", "UTF-16 虽然含 NUL，也不误判成二进制");
+      assert(SN.caps.can("reloadAsText", { kind: "big" }), "大文本只读也支持切回可编辑文本（能力表已放开）");
+
+      // 三向切换：字节来源走内存 raw（真实场景是 handle / File 引用 / raw 三选一）
+      const sw = {
+        id: "sw1", name: "sw.txt", path: "sw.txt", kind: "text", enc: "utf8", eol: "lf", lang: "txt",
+        dirty: false, readOnly: false, newFile: false,
+        raw: encBytes("alpha\nbeta\n"), content: "alpha\nbeta\n", size: 11
+      };
+      SN.addDoc(sw);
+      SN.activateDoc(sw.id);
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "hex" && sw.readOnly === true, "文本 → 二进制(Hex)：切换成功");
+      const swTab = byClass(documentStub.querySelector("#tabstrip"), "tab")
+        .filter(n => SN.menu.dataOf(n, "id") === sw.id)[0];
+      const swTag = SN.menu.firstDescendant(swTab, n => SN.menu.hasClass(n, "tmod"));
+      assert(swTag && swTag.textContent === "⛭", "切到 Hex 后标签上的视图标记就地更新为 ⛭");
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "text" && sw.content.indexOf("alpha") === 0, "二进制 → 文本：内容按源字节解码回来");
+      await SN.cmd.reloadAs(sw.id, "big");
+      assert(sw.kind === "big", "文本 → 大文本只读：切换成功");
+      assert(SN.menu.firstDescendant(swTab, n => SN.menu.hasClass(n, "tmod")).textContent === "≫",
+        "切到大文本只读后标签标记更新为 ≫");
+
+      // 大文件切回可编辑文本要二次确认（原来靠「文件 → 以文本模式打开…」让用户主动选，入口统一后搬到这里）
+      sw.size = bigLen + 1;
+      const savedConfirm = sandbox.confirm;
+      sandbox.confirm = () => false;
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "big", "大文件切回文本时取消确认 → 保持大文本只读");
+      sandbox.confirm = () => true;
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "text" && sw.readOnly === false, "确认后切回可编辑文本");
+
+      // 有未保存修改时切到只读视图也要确认：取消不能丢改动
+      sw.dirty = true;
+      sw.content = "edited in memory\n";
+      sandbox.confirm = () => false;
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "text" && sw.dirty === true, "有未保存修改时切只读视图需确认，取消 → 保持文本与脏标记");
+      sandbox.confirm = () => true;
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "hex" && sw.dirty === false, "确认后切到 Hex，并清掉脏标记（正文已被源字节替换）");
+      sandbox.confirm = savedConfirm;
+
+      // 没有源字节可用时要说清楚，而不是静默失败
+      const ghost = { id: "sw2", name: "ghost.txt", path: "ghost.txt", kind: "text", enc: "utf8", eol: "lf",
+        lang: "txt", dirty: false, readOnly: false, raw: null, content: "", size: 10 };
+      SN.app.docs.push(ghost);
+      await SN.cmd.reloadAs(ghost.id, "hex");
+      assert(ghost.kind === "text" && String(documentStub.querySelector("#msgLabel").textContent).indexOf("未保留原始字节") >= 0,
+        "取不到源字节时给出明确提示");
+      SN.app.docs = SN.app.docs.filter(x => x.id !== ghost.id && x.id !== sw.id);
+    }
+
+    // ⑮ 命令层与编辑器解耦：命令只做 SN.views.invoke 转发，能力不足必须给原因（不许静默）
+    {
+      // ① 文本视图把"编辑器专有能力"登记齐全（命令层依赖这些方法名）
+      const textAd = SN.views.byKind("text");
+      for (const m of ["undo", "redo", "clipboard", "findStep", "status", "applyView", "setZoom",
+        "bookmarkToggle", "bookmarkGoto", "bookmarksClear", "wordHighlight", "markKeyword", "setWebRanges"]) {
+        assert(typeof textAd[m] === "function", "文本适配器登记了 " + m + "()");
+      }
+      assert(typeof SN.views.invoke === "function", "SN.views.invoke 存在（命令层唯一转发入口）");
+      const msg = () => String(documentStub.querySelector("#msgLabel").textContent);
+      // invoke 取的是适配器而不是能力矩阵（这里踩过一次：viewcaps 里 of() 是矩阵、forDoc() 才是适配器）
+      const probe = { kind: "text", editor: null };
+      SN.setMsg("PROBE");
+      assert(SN.views.invoke("bookmark", "bookmarkToggle", probe) === false && msg() === "PROBE",
+        "适配器有该方法时 invoke 不写提示（未执行由方法返回 false 表达），实际=" + JSON.stringify(msg()));
+
+      // ② 大文件视图上调用这些命令：必须给出与能力表一致的原因，且不能抛
+      const bigDoc0 = SN.docById("bigA");
+      SN.app.activeId = bigDoc0.id;
+      const expectReason = (label, cap, run) => {
+        SN.setMsg("");
+        run();
+        const want = SN.caps.reason(cap, bigDoc0);
+        // want 必须非空：否则能力表已支持该能力，这条断言会变成"空对空"的假通过
+        assert(want && msg() === want, label + " 应提示「" + want + "」，实际=" + JSON.stringify(msg()));
+      };
+      expectReason("书签切换", "bookmark", () => SN.cmd.toggleBookmark());
+      expectReason("书签跳转", "bookmark", () => SN.cmd.gotoBookmark(1));
+      expectReason("清除书签", "bookmark", () => SN.cmd.clearBookmarks());
+      expectReason("显示空白", "view", () => SN.cmd.toggleSpaces());
+      expectReason("查找下一个", "findStep", () => { SN.app.findOpt.keyword = "needle"; SN.dlg.findNext(); });
+      // 面板"全部标记"：mark 能力在大文件视图是支持的，但该子动作只有编辑器实现 →
+      // invoke 的兜底也必须给出非空说明（reason() 此时是空串，不能直接写进状态栏）
+      SN.setMsg("");
+      SN.app.findOpt.keyword = "needle";
+      SN.cmd.markKeyword();
+      assert(msg() && msg().indexOf("未实现") >= 0,
+        "能力已声明但该子动作未实现时给出非空说明，实际=" + JSON.stringify(msg()));
+      // 大文件视图现在支持行列定位：命令不写提示，而是让视图写状态栏；Hex 仍不支持 → 必须给原因
+      SN.setMsg("PROBE");
+      SN.cmd.edStatus();
+      assert(msg() === "PROBE", "大文件行列统计不写提示（由视图直接写状态栏），实际=" + JSON.stringify(msg()));
+      const hexPos = { id: "hexPos", name: "x.bin", kind: "hex", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new Uint8Array([1, 2, 3]) };
+      SN.app.docs.push(hexPos);
+      SN.app.activeId = hexPos.id;
+      SN.setMsg("");
+      SN.cmd.edStatus();
+      assert(msg() === SN.caps.reason("statusPos", hexPos), "Hex 视图行列统计给能力表原因，实际=" + JSON.stringify(msg()));
+      SN.app.docs = SN.app.docs.filter(x => x.id !== hexPos.id);
+      SN.app.activeId = bigDoc0.id;
+      // 工具栏按钮走的是同一条转发路径（撤销 / 剪切）
+      const tbBtns = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      const undoBt = tbBtns.filter(b => String(b.title || "").indexOf("撤销") === 0)[0];
+      const cutBt = tbBtns.filter(b => String(b.title || "").indexOf("剪切") === 0)[0];
+      if (undoBt && undoBt.handlers.click) expectReason("工具栏撤销", "undo", () => undoBt.handlers.click[0]({ stopPropagation() { } }));
+      if (cutBt && cutBt.handlers.click) expectReason("工具栏剪切", "clipboard", () => cutBt.handlers.click[0]({ stopPropagation() { } }));
+      // 文本变换类（走 needEditor 前置）也给能力表原因，不再静默
+      expectReason("行操作", "edit", () => SN.cmd.lineOp("dup"));
+      expectReason("大小写", "edit", () => SN.cmd.caseOp("upper"));
+
+      // ③ 文本视图下同样的命令仍然照常工作（重构不能改行为）
+      const dT = SN.app.docs.filter(x => x.editor)[0];
+      SN.app.activeId = dT.id;
+      dT.editor.setText("alpha needle\nbeta needle\n", [0, 0]);
+      SN.app.findOpt.keyword = "needle";
+      SN.dlg.findNext();
+      assert(msg().indexOf("处（行 ") > 0, "文本视图 F3 仍能步进命中，实际=" + msg());
+      SN.cmd.clearBookmarks();
+      const bmLine = dT.editor.curLine() - 1;
+      SN.cmd.toggleBookmark();
+      assert(dT.editor.bookmarks.has(bmLine), "文本视图 toggleBookmark 仍可用（先清空再切换）");
+      SN.cmd.gotoBookmark(1);
+      SN.cmd.clearBookmarks();
+      assert(dT.editor.bookmarks.size === 0, "文本视图清书签仍可用");
+      SN.app.settings.showSpaces = true;
+      SN.cmd.toggleSpaces();
+      assert(dT.editor.showSpaces === SN.app.settings.showSpaces, "文本视图显示空白开关仍落到编辑器");
+      SN.cmd.zoom(10);
+      assert(dT.editor.zoom === SN.app.zoomPct, "文本视图缩放仍落到编辑器，zoom=" + dT.editor.zoom);
+      SN.cmd.wordHighlight("needle");
+      assert(dT.editor.wordRanges.length > 0, "文本视图双击词高亮仍可用");
+      SN.cmd.markKeyword();
+      assert(dT.editor.markRecords.length > 0, "文本视图「全部标记(面板关键字)」仍可用");
+      // 剪贴板走 textarea 的原生 execCommand：桩里没有该方法，注入一个假的验证转发链
+      const savedExec = documentStub.execCommand;
+      let execCalled = "";
+      documentStub.execCommand = (a) => { execCalled = a; return true; };
+      assert(SN.views.invoke("clipboard", "clipboard", dT, ["copy"]) === true && execCalled === "copy",
+        "文本视图剪贴板经适配器走到 execCommand(copy)");
+      documentStub.execCommand = savedExec;
+      SN.setMsg("");
+      assert(SN.views.invoke("clipboard", "clipboard", dT, ["copy"]) === false, "桩里没有 execCommand 时不抛、按未执行返回");
+      SN.cmd.edStatus();
+      const posText = String(documentStub.querySelector("#posLabel").textContent);
+      assert(posText.indexOf("Ln:") === 0, "文本视图行列统计仍上报到状态栏，实际=" + JSON.stringify(posText));
+      SN.app.activeId = "bigA";
+      SN.refreshMenus();
+    }
+
+    // ⑯ 大文件视图的 statusPos（行列定位）：无选中=视口首行，有选中=选区起点行/列 + 已选统计
+    {
+      const big = {
+        id: "posBig", name: "pos.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("alpha needle\nbeta line\nneedle two\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 30));         // 等行索引 + 首屏行渲染
+      const pos = () => String(documentStub.querySelector("#posLabel").textContent);
+      assert(SN.caps.can("statusPos", big) && typeof SN.views.byKind("big").status === "function",
+        "大文本视图声明并实现了行列定位");
+      SN.cmd.edStatus();
+      // 注意：大文件视图按「行起始字节偏移」计行，文件末尾的换行符不额外算一个空行
+      //（"a\nb\nc\n" → 3 行）；文本视图 countLines 是 +1 口径（同一内容 4 行）——两者各自的模型自洽
+      assert(/^Ln:1（视口首行）\s+共 3 行$/.test(pos()), "无选中时显示视口首行与总行数，实际=" + JSON.stringify(pos()));
+
+      // 造一个"选中第 2 行第 6 列"的选区（桩里造不出真实 Range，用等价对象驱动同一条代码路径）
+      const bigView = big.pageEl.children[0];
+      // 桩没有布局：给视口一个等效高度，让虚拟滚动真的渲染出一屏可视行
+      const viewportNode = bigView.children[0];
+      viewportNode.clientHeight = 240;
+      big._bigJump(1);
+      await new Promise(r => setTimeout(r, 30));
+      const row2 = SN.menu.firstDescendant(bigView, n => n._i === 1);
+      assert(row2, "第 2 行已渲染（虚拟滚动的可视行）");
+      const codeSpan = row2.children[1];
+      const fakeText = { nodeType: 3, data: "beta line", parentNode: codeSpan };
+      const savedSel = sandbox.window.getSelection;
+      sandbox.window.getSelection = () => ({
+        isCollapsed: false, rangeCount: 1, anchorNode: fakeText,
+        getRangeAt: () => ({ startContainer: fakeText, startOffset: 5 }),
+        toString: () => "beta line"
+      });
+      SN.cmd.edStatus();
+      assert(pos() === "Ln:2  Col:6  已选 1 行 / 9 字符  共 3 行",
+        "有选中时给出起点行列与已选统计，实际=" + JSON.stringify(pos()));
+
+      // 从未有过有效选区时折叠 → 仍是"视口首行"语义（此时还没有任何快照）
+      sandbox.window.getSelection = () => ({ isCollapsed: true, rangeCount: 0, anchorNode: fakeText, toString: () => "" });
+      SN.cmd.edStatus();
+      assert(/^Ln:1（视口首行）/.test(pos()), "没有过选区时显示视口首行，实际=" + JSON.stringify(pos()));
+
+      // —— 真实事件链路：走 selectionchange 处理器（而不是直接调命令）——
+      const rebuildSel = () => ({
+        isCollapsed: false, rangeCount: 1, anchorNode: fakeText,
+        getRangeAt: () => ({ startContainer: fakeText, startOffset: 5 }),
+        toString: () => "beta line"
+      });
+      sandbox.window.getSelection = rebuildSel;
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(pos() === "Ln:2  Col:6  已选 1 行 / 9 字符  共 3 行",
+        "拖选后状态栏立即更新为选区信息，实际=" + JSON.stringify(pos()));
+
+      // 右键/菜单抢焦点把 DOM 选区清掉：位置信息不该跟着消失（用户报的就是这个现象）
+      sandbox.window.getSelection = () => ({ isCollapsed: true, rangeCount: 0, anchorNode: fakeText, toString: () => "" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(pos().indexOf("已选 1 行 / 9 字符") > 0,
+        "选区被抢焦点清掉后仍显示刚才的选区信息（快照），实际=" + JSON.stringify(pos()));
+
+      // 显式左键点空白＝有意取消选择 → 清掉快照，回到视口首行
+      (bigView.handlers.mouseup || []).forEach(f => f({ button: 0 }));
+      assert(/^Ln:1（视口首行）/.test(pos()), "显式左键点空白后回到视口首行，实际=" + JSON.stringify(pos()));
+
+      // 滚动后"视口首行"跟着变（只依赖 scrollTop，O(1)）
+      // 用视图自己的定位接口，而不是写死像素：行高随缩放变化（见 ⑰）
+      big._bigJump(3);
+      sandbox.window.getSelection = savedSel;
+      SN.cmd.edStatus();
+      assert(/^Ln:3（视口首行）/.test(pos()), "滚动到第 3 行位置后显示 Ln:3，实际=" + JSON.stringify(pos()));
+      big._bigJump(1);
+
+      // 非活动文档不抢状态栏（避免后台视图刷掉当前文档的位置信息）
+      SN.app.activeId = "bigA";
+      const before = pos();
+      SN.views.invoke("statusPos", "status", big);
+      assert(pos() === before, "非活动文档不写状态栏");
+
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id);
+    }
+
+    // ⑰ 大文件视图的 zoom（缩放）：只改行高/字号并重画可视行，且与编辑器同一套数值
+    {
+      const big = {
+        id: "zoomBig", name: "zoom.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("one\ntwo\nthree\nfour\nfive\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 30));
+      const bigView = big.pageEl.children[0];
+      const viewportNode = bigView.children[0];
+      const innerNode = viewportNode.children[0];
+      viewportNode.clientHeight = 240;
+      assert(SN.caps.can("zoom", big) && typeof SN.views.byKind("big").setZoom === "function",
+        "大文本视图声明并实现了缩放");
+      assert(!SN.caps.can("zoom", { kind: "hex" }), "Hex 视图仍不支持缩放");
+
+      // 公式与编辑器同源：同一缩放级别下行高必须一致，否则切标签会看到行高跳变
+      const m150 = SN.zoomMetrics(150);
+      assert(m150.fs === 21 && m150.lh === 33, "SN.zoomMetrics(150) = 21px/33px，实际=" + m150.fs + "/" + m150.lh);
+      const dTz = SN.app.docs.filter(x => x.editor)[0];
+      dTz.editor.applyZoom(150);
+      assert(dTz.editor._lineH === m150.lh, "编辑器与大文件视图在 150% 下行高一致，实际=" + dTz.editor._lineH);
+      dTz.editor.applyZoom(100);
+
+      // 走真实命令路径：cmd.zoom(50) → app.zoomPct=150 → 广播到所有文档
+      SN.app.zoomPct = 100;
+      SN.cmd.zoom(50);
+      assert(SN.app.zoomPct === 150 && big.bigZoom === 150, "cmd.zoom 广播到活动的大文件文档，bigZoom=" + big.bigZoom);
+      assert(viewportNode.style.fontSize === "21px" && viewportNode.style.lineHeight === "33px",
+        "只读视图字号/行高按缩放改写，实际=" + viewportNode.style.fontSize + "/" + viewportNode.style.lineHeight);
+      // 行索引就绪后内容高度 = 行数 × 行高（行高变了必须重算，否则滚动位置全错）
+      await new Promise(r => setTimeout(r, 20));
+      const wantH = ((big.bigLineCount || 1) * m150.lh) + "px";
+      assert(innerNode.style.height === wantH, "内容高度按新行高重算，实际=" + innerNode.style.height + " 期望=" + wantH);
+      // 行节点是按行高建的，缩放后必须重建（复用了旧行高的节点会错位）
+      const row1 = SN.menu.firstDescendant(bigView, n => n._i === 0);
+      // 行高是通过 cssText 写进去的（桩不解析 cssText 的属性，只能整体包含判断）
+      assert(row1 && String(row1.style.cssText).indexOf("height:33px") >= 0,
+        "缩放后重画的行节点用新行高，实际=" + (row1 && row1.style.cssText));
+      // 定位/行列读数也跟着新行高走
+      big._bigJump(4);
+      SN.cmd.edStatus();
+      assert(String(documentStub.querySelector("#posLabel").textContent).indexOf("Ln:4") === 0,
+        "缩放到 150% 后定位到第 4 行仍然正确，实际=" + documentStub.querySelector("#posLabel").textContent);
+
+      // 缩回 100%：行高与内容高度回到基准
+      SN.cmd.zoom(-50);
+      assert(SN.app.zoomPct === 100 && big.bigZoom === 100 && viewportNode.style.lineHeight === "22px",
+        "缩回 100% 行高回到 22px，实际=" + viewportNode.style.lineHeight);
+
+      // 新开的文档沿用当前缩放（缩放是全局设置）
+      SN.cmd.zoom(50);                                  // → 150%
+      const big2 = {
+        id: "zoomBig2", name: "zoom2.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("x\ny\n")
+      };
+      SN.addDoc(big2);
+      assert(big2.bigZoom === 150, "新开的大文件文档沿用当前缩放级别，实际=" + big2.bigZoom);
+      const dtNew = { id: "zoomTxt", name: "z.txt", path: "z.txt", eol: "lf", lang: "txt", dirty: false,
+        kind: "text", enc: "utf8", readOnly: false, raw: null, content: "", size: 0 };
+      SN.addDoc(dtNew);
+      assert(dtNew.editor && dtNew.editor._lineH === SN.zoomMetrics(150).lh,
+        "新开的文本文档也沿用当前缩放，实际=" + (dtNew.editor && dtNew.editor._lineH));
+      SN.app.zoomPct = 100;
+      SN.cmd.zoom(0);                                   // 广播回 100%，避免影响后续段落
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id && x.id !== big2.id && x.id !== dtNew.id);
+    }
+
+    // ⑱ 横向滚动：长行必须能左右拖动查看（内容层要有按"最长行"算出的宽度，行号列 sticky 在左侧）
+    {
+      const longLine = "L" + "x".repeat(600) + "TAIL";       // 一行 605 字符，远超视口宽度
+      const big = {
+        id: "wideBig", name: "wide.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("short\n" + longLine + "\nshort2\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 40));            // 等行索引（最长行在这里统计）
+      const bigView = big.pageEl.children[0];
+      const viewportNode = bigView.children[0];
+      const innerNode = viewportNode.children[0];
+      viewportNode.clientHeight = 240;
+      viewportNode.clientWidth = 400;                       // 桩没有布局：给个视口宽度
+      big._bigApplyZoom(100);                               // 触发一次 size()，按当前宽度重算内容宽度
+      await new Promise(r => setTimeout(r, 20));
+
+      // 索引阶段顺带算出最长行（字节数），这是横向滚动宽度的唯一依据
+      assert(big.bigMaxLineBytes === longLine.length,
+        "建行索引时顺带统计最长行，实际=" + big.bigMaxLineBytes + " 期望=" + longLine.length);
+      const charW = Math.round(SN.zoomMetrics(100).fs * 0.6);   // 桩量不出字形宽度 → 代码按 0.6em 兜底
+      const innerW = parseInt(innerNode.style.width, 10);
+      assert(innerW >= longLine.length * charW,
+        "内容层宽度按最长行撑开（长行可左右拖动），实际=" + innerW + " 期望≥" + (longLine.length * charW));
+      assert(innerW > (viewportNode.clientWidth || 0),
+        "内容层必须宽于视口才会出现横向滚动条，实际=" + innerW + " 视口=" + viewportNode.clientWidth);
+
+      // 窗口很窄也一样能横向滚动；而短文件不应白留横向空白（宽度只按最长行算）
+      const bigNarrow = {
+        id: "narrowBig", name: "narrow.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("a\nbb\nccc\n")
+      };
+      SN.addDoc(bigNarrow);
+      await new Promise(r => setTimeout(r, 40));
+      const nView = bigNarrow.pageEl.children[0];
+      const nViewport = nView.children[0];
+      nViewport.clientHeight = 240;
+      nViewport.clientWidth = 400;
+      bigNarrow._bigApplyZoom(100);
+      await new Promise(r => setTimeout(r, 20));
+      const nInnerW = parseInt(nViewport.children[0].style.width, 10);
+      assert(nInnerW === 400, "短行文件的内容层宽度铺满视口即可（不额外留横向空白），实际=" + nInnerW);
+
+      // 缩放后字符变宽 → 内容宽度必须重算
+      big._bigApplyZoom(200);
+      await new Promise(r => setTimeout(r, 20));
+      const innerW200 = parseInt(innerNode.style.width, 10);
+      assert(innerW200 > innerW, "放大后内容宽度跟着变宽（字符宽度重算），150→" + innerW + " / 200→" + innerW200);
+
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id && x.id !== bigNarrow.id);
+    }
+
+    // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言
+    SN.app.docs = SN.app.docs.filter(d => d.id !== hexDoc.id);
+    SN.app.activeId = "bigA";
+    SN.refreshMenus();
   }
 
     // ---- 静态图标资源一致性 ----

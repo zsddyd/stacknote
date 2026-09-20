@@ -12,10 +12,19 @@
   function setMsg(m) { SN.setMsg(m); }
 
   // ============ 通用编辑辅助 ============
-  function mutateDocText(fn, caret) {
+  // 文本变换类命令的统一前置：当前视图没有编辑器时，按能力表说明原因
+  // （以前这里各自写提示、withBlock/moveLines 甚至静默 return —— 统一成一处，口径与菜单置灰一致）
+  function needEditor(cap) {
     const d = SN.activeDoc();
-    const ed = SN.activeEditor();
-    if (!d || !ed) { setMsg("没有活动文本文档"); return; }
+    const ed = d && d.editor ? d.editor : null;
+    if (!ed) { setMsg(d ? SN.caps.reason(cap || "edit", d) : "没有活动文本文档"); return null; }
+    return { d, ed };
+  }
+
+  function mutateDocText(fn, caret) {
+    const c = needEditor("edit");
+    if (!c) return false;
+    const d = c.d, ed = c.ed;
     ed.pushUndo();
     const r = fn(ed.text) || {};
     const nv = typeof r === "string" ? r : r.text;
@@ -23,10 +32,11 @@
     ed.setText(nv, r.sel || caret || [0, 0]);
     SN.docContentTouched(d);
     ed.focus();
+    return true;
   }
 
   function runWholeOrSelection(transform) {
-    mutateDocText((v) => {
+    return mutateDocText((v) => {
       const ed = SN.activeEditor();
       const s = ed.selStart, e = ed.selEnd;
       if (s === e) return transform(v);
@@ -39,30 +49,31 @@
   cmd.eolConv = function (eol) {
     const d = SN.activeDoc();
     if (!d) return;
-    mutateDocText((v) => SN.normalizeEol(v, eol));
+    // 未执行（当前视图没有编辑器）时保留 needEditor 写的原因，别覆盖成"已完成"
+    if (!mutateDocText((v) => SN.normalizeEol(v, eol))) return;
     d.eol = eol;
     SN.$("#eolSel").value = eol;
     setMsg("行尾已转为 " + eol.toUpperCase());
   };
 
   cmd.blankOp = function (mode) {
-    runWholeOrSelection((txt) => txt.split("\n").map(l => {
+    const ok = runWholeOrSelection((txt) => txt.split("\n").map(l => {
       if (mode === "head") return l.replace(/^[ \t]+/, "");
       if (mode === "end") return l.replace(/[ \t]+$/, "");
       return l.replace(/^[ \t]+/, "").replace(/[ \t]+$/, "");
     }).join("\n"));
+    if (!ok) return;
     setMsg("空白清理完成");
   };
 
   cmd.tabOp = function (mode) {
-    const d = SN.activeDoc();
-    mutateDocText((v) => edApi.convertSpace(v, app.settings.tabWidth || 4, mode));
+    if (!mutateDocText((v) => edApi.convertSpace(v, app.settings.tabWidth || 4, mode))) return;
     setMsg(mode === "tab2space" ? "TAB 已转为空格" : "空格已转为 TAB");
   };
 
   cmd.caseOp = function (type) {
     const names = { upper: "UPPERCASE", lower: "lowercase", proper: "Proper Case", properB: "Proper Case", sentence: "Sentence case", invert: "Invert Case", random: "Random Case" };
-    runWholeOrSelection((t) => edApi.caseText(t, type));
+    if (!runWholeOrSelection((t) => edApi.caseText(t, type))) return;
     setMsg("大小写转换完成: " + (names[type] || type));
   };
 
@@ -71,8 +82,9 @@
   function linesJoin(arr, endsNL) { return arr.join("\n") + (endsNL ? "\n" : ""); }
 
   function withBlock(fn, mode) {
-    const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!d || !ed) return;
+    const c = needEditor("edit");
+    if (!c) return false;
+    const d = c.d, ed = c.ed;
     ed.pushUndo();
     const v = ed.text;
     const s = ed.selStart, e = ed.selEnd;
@@ -92,17 +104,18 @@
     const arr = mid === "" ? [""] : mid.replace(/\n$/, "").split("\n");
     const out = fn(arr, v, bs) || arr;
     let nv = head + linesJoin(out, endsNL) + tail;
-    if (nv === v) { ed.focus(); return; }
+    if (nv === v) { ed.focus(); return true; }   // 执行了但内容没变
     // 防止破坏尾部空行
     d.content = nv;
     ed.setText(nv, [bs, bs]);
     SN.docContentTouched(d);
     ed.focus();
+    return true;
   }
 
   cmd.lineOp = function (op) {
     if (op === "up" || op === "down") return moveLines(op);
-    withBlock((arr) => {
+    const ok = withBlock((arr) => {
       if (op === "dup") return arr.concat(arr);
       if (op === "delDupConsec") return edApi.removeDupLines(arr, true);
       if (op === "delDupAll") return edApi.removeDupLines(arr, false);
@@ -112,12 +125,14 @@
       if (op === "split") return edApi.splitLongLines(arr, 100);
       return arr;
     });
+    if (!ok) return;
     setMsg("行操作完成: " + op);
   };
 
   function moveLines(dir) {
-    const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!d || !ed) return;
+    const c = needEditor("edit");
+    if (!c) return;
+    const d = c.d, ed = c.ed;
     ed.pushUndo();
     const v = ed.text;
     const s = ed.selStart, e = ed.selEnd;
@@ -143,24 +158,22 @@
 
   cmd.sortOp = function (id) {
     const mode = { lex_asc: "", lex_desc: "desc", lexci_asc: "ci", lexci_desc: "ci_desc", num_asc: "num", num_desc: "num_desc" }[id];
-    withBlock(arr => edApi.sortLines(arr, mode), "doc");
+    if (!withBlock(arr => edApi.sortLines(arr, mode), "doc")) return;
     setMsg("排序完成");
   };
 
   cmd.edStatus = function () {
-    const ed = SN.activeEditor();
-    if (ed) ed._reportStatus();
+    // 行列定位由视图适配器上报：大文件/Hex 没实现 status() → 按能力表说明原因，不再静默
+    SN.views.invoke("statusPos", "status", SN.activeDoc());
   };
 
   // ============ 视图开关 ============
-  function applyEditorView(d) {
-    if (!d || !d.editor || !SN.caps.can("view", d)) return;
-    const ed = d.editor;
-    ed.setWrap(app.settings.wrap);
-    ed.setShowSpaces(app.settings.showSpaces);
-    ed.setShowEol(app.settings.showEol);
+  // 开关是全局设置，广播到所有已打开文档：不支持的视图静默跳过（不逐个刷提示），
+  // 活动文档再单独走一次"不实现就提示原因"的调用
+  function viewForAll() {
+    app.docs.forEach(d => SN.views.invoke("view", "applyView", d, [], true));
+    SN.views.invoke("view", "applyView", SN.activeDoc());
   }
-  function viewForAll() { app.docs.forEach(d => { if (SN.caps.can("view", d)) applyEditorView(d); }); }
 
   cmd.toggleWrap = function () {
     app.settings.wrap = !app.settings.wrap;
@@ -179,7 +192,7 @@
     app.settings.webAddrHighlight = !app.settings.webAddrHighlight;
     saveViewState(); rebuildUi();
     if (app.settings.webAddrHighlight) applyWebHighlights();
-    else app.docs.forEach(d => { if (d.editor) d.editor.setWebRanges([]); });
+    else app.docs.forEach(d => SN.views.invoke("view", "setWebRanges", d, [[]], true));
   };
   function saveViewState() { SN.saveSettings(); }
 
@@ -217,7 +230,9 @@
   cmd.zoom = function (delta) {
     app.zoomPct = Math.max(50, Math.min(250, (app.zoomPct || 100) + delta));
     const pct = app.zoomPct;
-    app.docs.forEach(d => { if (d.editor) d.editor.applyZoom(pct); });
+    // 广播到所有文档（切换标签后缩放一致）；不支持的视图静默跳过，活动文档单独提示
+    app.docs.forEach(d => SN.views.invoke("zoom", "setZoom", d, [pct], true));
+    SN.views.invoke("zoom", "setZoom", SN.activeDoc(), [pct]);
     $("#zoomLabel").textContent = "Zoom " + pct + "%";
   };
 
@@ -256,31 +271,45 @@
     updateStatusLabel();
     setMsg("编码标记已切换为 " + SN.codeById(code).name + "（保存时生效）");
   };
-  cmd.reloadAs = function (docId, kind) {
+  // 重新打开为指定视图（三种视图互相切换）。打开入口统一成「打开…」+ 自动识别之后，
+  // 需要强制视图时都走这里：重新取源字节 → 复用 app.js 的 applyBytesToDoc 判定/解码 → 重建页面。
+  cmd.reloadAs = async function (docId, kind) {
     const d = SN.docById(docId);
     if (!d) return;
-    const target = kind;   // 目标视图类型（"text" / "hex"）
-    // 能否切回可编辑文本由能力表决定（大文本视图不支持，Hex 支持）：
-    // 大文件请用「文件 → 以文本模式打开…」重新打开，避免整篇解码卡顿
+    const target = kind;   // "text" / "big" / "hex"
+    if (target !== "text" && target !== "big" && target !== "hex") { setMsg("不支持的视图类型"); return; }
+    // 能否切回可编辑文本由能力表决定（见 js/viewcaps.js；三种视图现在都支持，留着是为了口径统一）
     if (target === "text" && !SN.caps.can("reloadAsText", d)) { setMsg(SN.caps.reason("reloadAsText", d)); return; }
-    if (target === "text") {
-      if (SN.caps.can("edit", d)) { setMsg("当前已是文本模式"); return; }
-      if (!d.raw) { setMsg("未保留原始字节，无法切回文本模式"); return; }
-      const text = SN.decodeBytes(d.raw, d.enc);
-      d.kind = "text";
-      d.content = SN.normalizeEol(text, "lf");
-      d.eol = SN.detectEol(text);
-      d.raw = null;
-      d.readOnly = false;
+    if (SN.caps.kindOf(d) === target) { setMsg("当前已经是" + SN.caps.label({ kind: target }) + "视图"); return; }
+    // 切到只读视图会用磁盘字节替换正文：有未保存修改时先确认，别让改动无声消失
+    if (d.dirty && target !== "text") {
+      if (!confirm("“" + d.name + "”有未保存的修改，切到" + SN.caps.label({ kind: target }) +
+        "视图会丢弃这些修改（原文件不变）。继续？")) { setMsg("已取消切换视图"); return; }
+    }
+    // 切回可编辑文本对大文件是重操作（整篇解码 + 可编辑 textarea）：二次确认
+    if (target === "text" && (d.size || 0) > SN.bigLimitBytes()) {
+      if (!confirm("“" + d.name + "”共 " + SN.fmtSize(d.size) + "，切回可编辑文本需要整篇解码，可能较慢。继续？")) {
+        setMsg("已取消切回文本模式"); return;
+      }
+    }
+    const bytes = await SN.sourceBytesOf(d);
+    if (!bytes) {
+      setMsg(d.newFile
+        ? "新文档还没有对应文件，无法「重新打开为」其他视图；先保存，或用「打开…」选择文件"
+        : "未保留原始字节，无法重新打开为" + SN.caps.label({ kind: target }) + "；请用「打开…」重新选择该文件");
+      return;
+    }
+    try {
+      SN.applyBytesToDoc(d, bytes, target, bytes.length || d.size || 0);
+      SN.docMarkClean(d);
       SN.rebuildDocPage(d);
-      setMsg("已切换为文本编辑模式（大文件编辑可能较慢）");
-    } else if (target === "hex") {
-      const bytes = d.raw;
-      if (!bytes) { setMsg("未保留原始字节，无法转 Hex 视图"); return; }
-      d.kind = "hex";
-      SN.rebuildDocPage(d);
-      setMsg("已切换为 Hex 只读视图");
-    } else setMsg("不支持的视图类型");
+      if (SN.updateTabTags) SN.updateTabTags();
+      if (SN.updateFileList) SN.updateFileList();
+      const view = SN.views.byKind(d.kind);
+      setMsg("已重新打开为" + SN.caps.label(d) + "（" + SN.fmtSize(d.size) + "，" + SN.codeById(d.enc).name + view.open.note + "）");
+    } catch (e) {
+      setMsg("重新打开失败：" + (e && e.message ? e.message : e));
+    }
   };
   // Hex 视图适配器：渲染、导出原始字节、切回可编辑文本都由 app2.js 实现
   SN.views.define("hex", {
@@ -288,7 +317,13 @@
     // 二进制视图：不解码正文，保留原始字节，编码栏用 utf8 占位
     open: { readOnly: true, keepRawBytes: true, decodeMode: "none", fallbackEnc: "utf8" },
     render: (doc, page) => { page.appendChild(buildHexView(doc)); return true; },
-    exportBytes: (doc) => { SN.download(doc.name + ".hex", new Blob([doc.raw])); }
+    exportBytes: (doc) => { SN.download(doc.name + ".hex", new Blob([doc.raw])); },
+    // 右键菜单：Hex 视图只支持导出原始字节 / 切回可编辑文本 / 重命名（见 js/viewcaps.js）
+    contextMenu: (doc) => [
+      { label: "导出原始文件", requires: "exportBytes", action: () => SN.cmd.downloadDoc(doc.id) },
+      { label: "以文本模式重载", requires: "reloadAsText", action: () => SN.cmd.reloadAs(doc.id, "text") },
+      { label: "重命名…", requires: "rename", action: () => SN.cmd.renameDoc(doc.id) }
+    ]
   });
   function updateStatusLabel() {
     const d = SN.activeDoc();
@@ -302,14 +337,15 @@
   const URL_RE = /(https?:\/\/|ftp:\/\/|www\.)[^\s<>"']+/gi;
   function applyWebHighlights() {
     app.docs.forEach(d => {
-      // Web 地址高亮是编辑器渲染特性（与换行/空白同属 view 能力）
-      if (!d.editor || !SN.caps.can("view", d)) return;
-      if (!app.settings.webAddrHighlight) { d.editor.setWebRanges([]); return; }
+      // Web 地址高亮是编辑器渲染特性（与换行/空白同属 view 能力）：
+      // 范围在这里算，落到视图上仍走适配器（不支持的视图静默跳过）
+      if (!SN.caps.can("view", d)) return;
+      if (!app.settings.webAddrHighlight) { SN.views.invoke("view", "setWebRanges", d, [[]], true); return; }
       const marks = [];
       let m;
       const re = new RegExp(URL_RE.source, "gi");
       while ((m = re.exec(d.content || ""))) marks.push({ start: m.index, end: m.index + m[0].length, color: "#BBDEFB" });
-      d.editor.setWebRanges(marks);
+      SN.views.invoke("view", "setWebRanges", d, [marks], true);
     });
   }
 
@@ -349,8 +385,13 @@
     if (!ad.markSelection) { setMsg(SN.caps.reason("mark", d)); return false; }
     return ad.markSelection(d, app.curMarkColor, app.findOpt);
   };
-  // 文本视图的标记实现（编辑器提供多关键字标记记录）
+  // ============ 文本视图适配器：编辑器专有能力都在这里登记 ============
+  // 目的：命令层不再直接拿 activeEditor()，一律走 SN.views.invoke("能力", "方法", doc)。
+  // 这样将来给大文件视图补同一能力（例如 findStep），只需在这里之外再加一份实现，命令层不用改；
+  // 而当前视图没实现时会得到与菜单置灰同一句原因，不会"菜单亮了但点了没反应"。
+  function edOf(d) { return d && d.editor ? d.editor : null; }
   SN.views.define("text", {
+    // ---- 标记（编辑器提供多关键字标记记录） ----
     clearMarks: (d) => { if (d.editor) d.editor.clearPersistentMarks(); },
     markSelection: (d, color, findOpt) => {
       const ed = d.editor;
@@ -362,7 +403,91 @@
       ed.focus();
       setMsg("已用颜色高亮 “" + kw + "”：共 " + count + " 处（可继续选其它词/颜色叠加）");
       return true;
-    }
+    },
+    // 查找面板的「全部标记」：以面板关键字为准（避免误用编辑器旧选区）
+    markKeyword: (d, kw) => {
+      const ed = edOf(d);
+      if (!ed || !kw) return false;
+      const count = ed.upsertMarkRecord(kw, app.curMarkColor, app.findOpt);
+      setMsg("标记完成：共 " + count + " 处（“" + kw + "”+" + app.curMarkColor + "）");
+      return true;
+    },
+    // 双击取词高亮
+    wordHighlight: (d, word) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      let kw = word;
+      if (!kw) kw = ed.wordAtSelection();
+      if (!kw) { setMsg("请选择要高亮的文本"); return false; }
+      const ms = findMatches(ed.text, kw, { case: true, whole: true, regex: false });
+      ed.setWordRanges(ms.map(m => ({ start: m.start, end: m.end, color: "#B3E5FC" })));
+      setMsg("高亮 “" + kw + "”：共 " + ms.length + " 处");
+      return true;
+    },
+    // ---- 撤销/重做（编辑器自管撤销栈） ----
+    undo: (d) => { const ed = edOf(d); if (!ed) return false; ed.undo(); return true; },
+    redo: (d) => { const ed = edOf(d); if (!ed) return false; ed.redo(); return true; },
+    // ---- 剪贴板：textarea 才有的原生 execCommand 路径 ----
+    clipboard: (d, action) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      ed.ta.focus();
+      // 非安全上下文/无 execCommand 的环境（例如 smoke 的 DOM 桩）不要抛，按"未执行"返回
+      if (typeof document.execCommand !== "function") return false;
+      document.execCommand(action);
+      if (action === "cut" || action === "paste") {
+        setTimeout(() => { if (ed.onChange) ed.onChange(ed.text, ed); }, 0);
+      }
+      return true;
+    },
+    // ---- 查找步进（F3/F4、查找对话框的"下一个/上一个"）----
+    findStep: (d, forward) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      const kw = app.findOpt.keyword;
+      if (!kw) return false;                    // 没关键字时由命令层去打开查找对话框
+      const ms = findMatches(ed.text, kw, app.findOpt);
+      if (!ms.length) { setMsg("未找到：" + kw); return false; }
+      const caret = ed.caret();
+      let idx = ms.findIndex(m => forward ? m.end > caret : m.start < caret);
+      if (idx < 0) idx = forward ? 0 : ms.length - 1;
+      const hit = ms[idx];
+      ed._setTextWithSel(ed.text, hit.start, hit.end);
+      ed.scrollToPos(hit.start);
+      ed.focus();
+      ed.setFindRanges(ms.map(x => ({ start: x.start, end: x.end, color: "#FFF59D" })));
+      setMsg("第 " + (idx + 1) + "/" + ms.length + " 处（行 " + hit.line + "）");
+      return true;
+    },
+    // ---- 状态栏行列（编辑器通过 onStatus 回调上报） ----
+    status: (d) => { const ed = edOf(d); if (!ed) return false; ed._reportStatus(); return true; },
+    // ---- 视图开关：自动换行 / 显示空白 / 显示行尾 ----
+    applyView: (d) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      ed.setWrap(app.settings.wrap);
+      ed.setShowSpaces(app.settings.showSpaces);
+      ed.setShowEol(app.settings.showEol);
+      return true;
+    },
+    // Web 地址高亮：范围由调用方算好，这里只负责落到编辑器
+    setWebRanges: (d, ranges) => { const ed = edOf(d); if (!ed) return false; ed.setWebRanges(ranges || []); return true; },
+    // ---- 缩放 ----
+    setZoom: (d, pct) => { const ed = edOf(d); if (!ed) return false; ed.applyZoom(pct); return true; },
+    // ---- 书签 ----
+    bookmarkToggle: (d) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      ed.toggleBookmark(ed.curLine() - 1);
+      return true;
+    },
+    bookmarkGoto: (d, dir) => {
+      const ed = edOf(d);
+      if (!ed) return false;
+      if (!ed.gotoBookmark(dir)) { setMsg("没有书签"); return false; }
+      return true;
+    },
+    bookmarksClear: (d) => { const ed = edOf(d); if (!ed) return false; ed.clearBookmarks(); return true; }
   });
   cmd.markAll = function () {
     const ok = cmd.markSelected();
@@ -370,13 +495,9 @@
   };
   // 查找面板内“全部标记”：以面板关键字为准（避免误用编辑器旧选区）
   cmd.markKeyword = function () {
-    const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!d || !ed) { setMsg(d ? SN.caps.reason("mark", d) : "没有活动文本文档"); return false; }
     const kw = app.findOpt.keyword;
     if (!kw) { setMsg("请输入要标记的关键字"); return false; }
-    const count = ed.upsertMarkRecord(kw, app.curMarkColor, app.findOpt);
-    setMsg("标记完成：共 " + count + " 处（“" + kw + "”+" + app.curMarkColor + "）");
-    return true;
+    return SN.views.invoke("mark", "markKeyword", SN.activeDoc(), [kw]);
   };
   cmd.clearMarksAll = function () {
     app.docs.forEach(d => {
@@ -386,29 +507,17 @@
     setMsg("已清除全部标记");
   };
   cmd.wordHighlight = function (word) {
-    const d = SN.activeDoc(), ed = SN.activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("mark", d)); return; }
-    if (!word) { const w = ed.wordAtSelection(); word = w; }
-    if (!word) { setMsg("请选择要高亮的文本"); return; }
-    const opts = { case: true, whole: true, regex: false };
-    const ms = findMatches(ed.text, word, opts);
-    ed.setWordRanges(ms.map(m => ({ start: m.start, end: m.end, color: "#B3E5FC" })));
-    setMsg("高亮 “" + word + "”：" + ms.length + " 处");
+    SN.views.invoke("mark", "wordHighlight", SN.activeDoc(), [word]);
   };
 
   cmd.toggleBookmark = function () {
-    const ed = SN.activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("bookmark", SN.activeDoc())); return; }
-    ed.toggleBookmark(ed.curLine() - 1);
+    SN.views.invoke("bookmark", "bookmarkToggle", SN.activeDoc());
   };
   cmd.gotoBookmark = function (dir) {
-    const ed = SN.activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("bookmark", SN.activeDoc())); return; }
-    if (ed && !ed.gotoBookmark(dir)) setMsg("没有书签");
+    SN.views.invoke("bookmark", "bookmarkGoto", SN.activeDoc(), [dir]);
   };
   cmd.clearBookmarks = function () {
-    const ed = SN.activeEditor();
-    if (ed) ed.clearBookmarks();
+    SN.views.invoke("bookmark", "bookmarksClear", SN.activeDoc());
   };
 
   // ============ 查找对话框 ============
@@ -561,20 +670,10 @@
   };
 
   function jumpFind(forward) {
-    const ed = SN.activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("find", SN.activeDoc())); return; }
+    // 步进查找要"光标"这个概念：命令层只管"有没有关键字/该不该开对话框"，
+    // 具体怎么在当前视图里步进由适配器实现（大文件视图补 findStep 时命令层不用改）
     if (!app.findOpt.keyword) { dlg.find({ scope: "doc" }); return; }
-    const ms = findMatches(ed.text, app.findOpt.keyword, app.findOpt);
-    if (!ms.length) { setMsg("未找到：" + app.findOpt.keyword); return; }
-    const caret = ed.caret();
-    let idx = ms.findIndex(m => forward ? m.end > caret : m.start < caret);
-    if (idx < 0) idx = forward ? 0 : ms.length - 1;
-    const hit = ms[idx];
-    ed._setTextWithSel(ed.text, hit.start, hit.end);
-    ed.scrollToPos(hit.start);
-    ed.focus();
-    ed.setFindRanges(ms.map(x => ({ start: x.start, end: x.end, color: "#FFF59D" })));
-    setMsg("第 " + (idx + 1) + "/" + ms.length + " 处（行 " + hit.line + "）");
+    SN.views.invoke("findStep", "findStep", SN.activeDoc(), [forward]);
   }
   dlg.findNext = function () { jumpFind(true); };
   dlg.findPrev = function () { jumpFind(false); };
@@ -599,21 +698,7 @@
         row.dataset.start = r.start;
         row.dataset.end = r.end;
         row.dataset.line = r.line;
-        row.addEventListener("click", () => {
-          SN.activateDoc(r.docId);
-          const ad = SN.activeDoc();
-          const ed = SN.activeEditor();
-          // 无编辑器（大文本只读）：交给该视图适配器定位到命中行
-          if (!ed && ad && r.line) { const view = SN.views.of(ad); if (view.jumpToLine) { view.jumpToLine(ad, r.line); return; } }
-          if (ed) {
-            if (r.start !== undefined && r.end !== undefined && r.start !== null) {
-              ed._setTextWithSel(ed.text, r.start, r.end); ed.scrollToPos(r.start);
-            } else if (r.line) {
-              ed.gotoLine(r.line);
-            }
-            ed.focus();
-          }
-        });
+        row.addEventListener("click", () => jumpResultRow(row));
         g.body.appendChild(row);
       }
       view.appendChild(g.group);
@@ -624,6 +709,62 @@
     if (!t.trim()) { setMsg("没有可复制的查找结果"); return; }
     navigator.clipboard.writeText(t).then(() => setMsg("已复制查找结果"));
   };
+
+  // ============ 查找结果右键菜单（#resultView 上的统一委托） ============
+  // 行内跳转逻辑与左键点击同源：jumpResultRow 同时服务 click 与右键「跳转到该行」
+  function jumpResultRow(row) {
+    const docId = SN.menu.dataOf(row, "doc");
+    const start = SN.menu.dataOf(row, "start");
+    const end = SN.menu.dataOf(row, "end");
+    const line = parseInt(SN.menu.dataOf(row, "line"), 10);
+    SN.activateDoc(docId);
+    const ad = SN.activeDoc();
+    const ed = SN.activeEditor();
+    // 无编辑器（大文本只读）：交给该视图适配器定位到命中行
+    if (!ed && ad && line) { const view = SN.views.of(ad); if (view.jumpToLine) { view.jumpToLine(ad, line); return; } }
+    if (!ed) return;
+    if (start !== undefined && end !== undefined && start !== null && start !== "") {
+      ed._setTextWithSel(ed.text, +start, +end); ed.scrollToPos(+start);
+    } else if (line) {
+      ed.gotoLine(line);
+    }
+    ed.focus();
+  }
+  // 结果行里除行号（.lnn）之外的那段文本，就是命中内容
+  function resultRowText(row) {
+    for (const c of (row.children || [])) {
+      if (!SN.menu.hasClass(c, "lnn")) return c.textContent || "";
+    }
+    return row.textContent || "";
+  }
+  SN.menu.register("#resultView", {
+    match: (n) => SN.menu.hasClass(n, "res-row") || SN.menu.hasClass(n, "res-sec"),
+    items: (n) => {
+      if (SN.menu.hasClass(n, "res-row")) {
+        const line = parseInt(SN.menu.dataOf(n, "line"), 10) || 0;
+        const text = resultRowText(n);
+        return [
+          { label: "跳转到该行", action: () => jumpResultRow(n) },
+          "-",
+          { label: "复制该行文本", action: () => SN.menu.copyText(text).then(ok => setMsg(ok ? "已复制该行" : "浏览器未允许写入剪贴板")) },
+          { label: "复制行号+文本", action: () => SN.menu.copyText("行 " + line + ": " + text).then(ok => setMsg(ok ? "已复制" : "浏览器未允许写入剪贴板")) },
+          { label: "复制全部结果", action: () => cmd.copyResultDock() }
+        ];
+      }
+      // 分组头：折叠/展开该组（复用 resultGroup 里的同一个开关）+ 复制该文件结果
+      const group = SN.menu.upFrom(n, x => SN.menu.hasClass(x, "res-group"));
+      const body = group ? SN.menu.firstDescendant(group, x => SN.menu.hasClass(x, "res-body")) : null;
+      return [
+        { label: "折叠/展开该组", disabled: !(n && n._toggleGroup), action: () => { if (n._toggleGroup) n._toggleGroup(); } },
+        { label: "复制该文件结果", disabled: !body, action: () => {
+          const t = body ? (body.textContent || "") : "";
+          if (!t.trim()) { setMsg("没有可复制的结果"); return; }
+          SN.menu.copyText(t).then(ok => setMsg(ok ? "已复制该文件结果" : "浏览器未允许写入剪贴板"));
+        } }
+      ];
+    },
+    ctx: () => ({ doc: SN.activeDoc() })
+  });
 
   // ============ 其它对话框 ============
   dlg.gotoLine = function () {
@@ -778,8 +919,9 @@
   function setMsg(m) { SN.setMsg(m); }
   function mutateDocText(fn, caret) {
     const d = SN.activeDoc();
-    const ed = SN.activeEditor();
-    if (!d || !ed) return;
+    const ed = d && d.editor ? d.editor : null;
+    // 与第一段同口径：没有编辑器就按能力表说明原因（调用方已各自前置检查，这里只是兜底）
+    if (!ed) { setMsg(d ? SN.caps.reason("edit", d) : "没有活动文本文档"); return false; }
     ed.pushUndo();
     const r = fn(ed.text) || {};
     const nv = typeof r === "string" ? r : r.text;
@@ -787,6 +929,7 @@
     ed.setText(nv, r.sel || caret || [0, 0]);
     SN.docContentTouched(d);
     ed.focus();
+    return true;
   }
 
   // ================= 工具 =================
@@ -1131,7 +1274,7 @@ SN.openModal({
         boxes.forEach(x => grid.appendChild(x));
         b.appendChild(grid);
         b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "大文本虚拟只读阈值(MB)" }), numIn("optBig", s.bigThresholdMB, 2, 500)]));
-        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 2MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，用“以文本模式打开”强制可编辑（大文件会较慢）。" }));
+        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 2MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，打开后右键标签选「重新打开为 → 文本编辑」（会二次确认，大文件较慢）。" }));
         function sel(id, opts, val) { const s2 = el("select", { id }); opts.forEach(o => s2.appendChild(el("option", { value: o[0], text: o[1], selected: o[0] === val }))); return s2; }
         function numIn(id, val, min, max) { return el("input", { type: "number", id, value: val, min, max, style: "width:90px" }); }
         function chk(id, label, v) { return el("label", {}, [el("input", { type: "checkbox", id, checked: v }), " " + label]); }

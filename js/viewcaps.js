@@ -42,12 +42,16 @@
     },
     big: {
       label: "大文本只读",
-      // 大文件走虚拟滚动只读视图：能看、能搜、能标记、能定位行、能导出原始字节
-      caps: ["find", "mark", "gotoLine", "exportBytes", "rename"]
+      // 大文件走虚拟滚动只读视图：能看、能搜、能标记、能定位行、能导出原始字节；
+      // 也能切回可编辑文本（右键「重新打开为 → 文本编辑」，会二次确认，见 app2 的 cmd.reloadAs）；
+      // statusPos=行列定位（语义：选中起点行/列，或"视口首行"），只有可视行参与，O(1)；
+      // zoom=缩放（改行高/字号并只重画可视行，与编辑器同公式 SN.zoomMetrics）
+      caps: ["find", "mark", "gotoLine", "exportBytes", "rename", "reloadAsText", "statusPos", "zoom"]
     },
     hex: {
       label: "Hex 只读",
-      caps: ["exportBytes", "reloadAsText"]
+      // 重命名只改文档名、不需要正文，Hex 视图同样可用（右键菜单据此给出「重命名…」）
+      caps: ["exportBytes", "reloadAsText", "rename"]
     }
   };
 
@@ -91,7 +95,9 @@
     tabTag: "", listTag: "", modeTag: "", persistBody: true,
     open: DEFAULT_OPEN,
     render: null, jumpToLine: null, search: null,
-    selectionKeyword: null, markSelection: null, clearMarks: null, exportBytes: null
+    selectionKeyword: null, markSelection: null, clearMarks: null, exportBytes: null,
+    // 各视图自己的右键菜单（由拥有该视图实现的模块注册；缺省表示该视图不接管右键）
+    contextMenu: null
   };
   function define(kind, part) {
     const merged = Object.assign({}, EMPTY, ADAPTERS[kind], part);
@@ -102,6 +108,24 @@
   function byKind(kind) { return ADAPTERS[kind] || EMPTY; }
   function forDoc(doc) { return byKind(kindOf(doc)); }
 
+  // 命令层唯一入口：能力(cap) → 适配器方法(method)。
+  // 适配器没实现该方法时，按能力表给出与菜单置灰同一句原因（绝不静默 —— "菜单亮了但点了没反应"就是缺这一层）。
+  // silent=true 用于批量广播（例如缩放要作用到所有已打开文档），不给不支持的视图逐个刷提示。
+  // args 为附加参数数组；适配器方法返回 false 视为"未执行"，其余情况视为已处理。
+  function invoke(cap, method, doc, args, silent) {
+    const d = resolve(doc);
+    // 注意用 forDoc（取适配器），不是 of（那是能力矩阵）
+    const ad = forDoc(d);
+    if (!ad || typeof ad[method] !== "function") {
+      // reason() 在该能力"已声明支持"时返回空串（说明是子动作没实现），此时也要给出非空说明，
+      // 否则状态栏会写进空串 —— 比"没反应"更让人困惑
+      const why = reason(cap, d) || ("当前视图未实现" + (NAMES[cap] || cap));
+      if (!silent && SN.setMsg) SN.setMsg(why);
+      return false;
+    }
+    return ad[method].apply(ad, [d].concat(args || [])) !== false;
+  }
+
   SN.caps = { NAMES, DISPLAY, MATRIX, kindOf, of, label, can, reason };
-  SN.views = { define, byKind, of: forDoc, ADAPTERS };
+  SN.views = { define, byKind, of: forDoc, ADAPTERS, invoke };
 })();
