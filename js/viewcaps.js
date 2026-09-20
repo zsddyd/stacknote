@@ -106,6 +106,21 @@
   function byKind(kind) { return ADAPTERS[kind] || EMPTY; }
   function forDoc(doc) { return byKind(kindOf(doc)); }
 
+  // 命令层唯一入口：能力(cap) → 适配器方法(method)。
+  // 适配器没实现该方法时，按能力表给出与菜单置灰同一句原因（绝不静默 —— "菜单亮了但点了没反应"就是缺这一层）。
+  // silent=true 用于批量广播（例如缩放要作用到所有已打开文档），不给不支持的视图逐个刷提示。
+  // args 为附加参数数组；适配器方法返回 false 视为"未执行"，其余情况视为已处理。
+  function invoke(cap, method, doc, args, silent) {
+    const d = resolve(doc);
+    // 注意用 forDoc（取适配器），不是 of（那是能力矩阵）
+    const ad = forDoc(d);
+    if (!ad || typeof ad[method] !== "function") {
+      if (!silent && SN.setMsg) SN.setMsg(reason(cap, d));
+      return false;
+    }
+    return ad[method].apply(ad, [d].concat(args || [])) !== false;
+  }
+
   SN.caps = { NAMES, DISPLAY, MATRIX, kindOf, of, label, can, reason };
-  SN.views = { define, byKind, of: forDoc, ADAPTERS };
+  SN.views = { define, byKind, of: forDoc, ADAPTERS, invoke };
 })();

@@ -1221,6 +1221,88 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       SN.app.docs = SN.app.docs.filter(x => x.id !== ghost.id && x.id !== sw.id);
     }
 
+    // ⑮ 命令层与编辑器解耦：命令只做 SN.views.invoke 转发，能力不足必须给原因（不许静默）
+    {
+      // ① 文本视图把"编辑器专有能力"登记齐全（命令层依赖这些方法名）
+      const textAd = SN.views.byKind("text");
+      for (const m of ["undo", "redo", "clipboard", "findStep", "status", "applyView", "setZoom",
+        "bookmarkToggle", "bookmarkGoto", "bookmarksClear", "wordHighlight", "markKeyword", "setWebRanges"]) {
+        assert(typeof textAd[m] === "function", "文本适配器登记了 " + m + "()");
+      }
+      assert(typeof SN.views.invoke === "function", "SN.views.invoke 存在（命令层唯一转发入口）");
+      const msg = () => String(documentStub.querySelector("#msgLabel").textContent);
+      // invoke 取的是适配器而不是能力矩阵（这里踩过一次：viewcaps 里 of() 是矩阵、forDoc() 才是适配器）
+      const probe = { kind: "text", editor: null };
+      SN.setMsg("PROBE");
+      assert(SN.views.invoke("bookmark", "bookmarkToggle", probe) === false && msg() === "PROBE",
+        "适配器有该方法时 invoke 不写提示（未执行由方法返回 false 表达），实际=" + JSON.stringify(msg()));
+
+      // ② 大文件视图上调用这些命令：必须给出与能力表一致的原因，且不能抛
+      const bigDoc0 = SN.docById("bigA");
+      SN.app.activeId = bigDoc0.id;
+      const expectReason = (label, cap, run) => {
+        SN.setMsg("");
+        run();
+        const want = SN.caps.reason(cap, bigDoc0);
+        assert(msg() === want, label + " 应提示「" + want + "」，实际=" + JSON.stringify(msg()));
+      };
+      expectReason("书签切换", "bookmark", () => SN.cmd.toggleBookmark());
+      expectReason("书签跳转", "bookmark", () => SN.cmd.gotoBookmark(1));
+      expectReason("清除书签", "bookmark", () => SN.cmd.clearBookmarks());
+      expectReason("行列统计", "statusPos", () => SN.cmd.edStatus());
+      expectReason("缩放", "zoom", () => SN.cmd.zoom(10));
+      expectReason("显示空白", "view", () => SN.cmd.toggleSpaces());
+      expectReason("全部标记(面板)", "mark", () => { SN.app.findOpt.keyword = "needle"; SN.cmd.markKeyword(); });
+      expectReason("查找下一个", "findStep", () => { SN.app.findOpt.keyword = "needle"; SN.dlg.findNext(); });
+      // 工具栏按钮走的是同一条转发路径（撤销 / 剪切）
+      const tbBtns = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      const undoBt = tbBtns.filter(b => String(b.title || "").indexOf("撤销") === 0)[0];
+      const cutBt = tbBtns.filter(b => String(b.title || "").indexOf("剪切") === 0)[0];
+      if (undoBt && undoBt.handlers.click) expectReason("工具栏撤销", "undo", () => undoBt.handlers.click[0]({ stopPropagation() { } }));
+      if (cutBt && cutBt.handlers.click) expectReason("工具栏剪切", "clipboard", () => cutBt.handlers.click[0]({ stopPropagation() { } }));
+      // 文本变换类（走 needEditor 前置）也给能力表原因，不再静默
+      expectReason("行操作", "edit", () => SN.cmd.lineOp("dup"));
+      expectReason("大小写", "edit", () => SN.cmd.caseOp("upper"));
+
+      // ③ 文本视图下同样的命令仍然照常工作（重构不能改行为）
+      const dT = SN.app.docs.filter(x => x.editor)[0];
+      SN.app.activeId = dT.id;
+      dT.editor.setText("alpha needle\nbeta needle\n", [0, 0]);
+      SN.app.findOpt.keyword = "needle";
+      SN.dlg.findNext();
+      assert(msg().indexOf("处（行 ") > 0, "文本视图 F3 仍能步进命中，实际=" + msg());
+      SN.cmd.clearBookmarks();
+      const bmLine = dT.editor.curLine() - 1;
+      SN.cmd.toggleBookmark();
+      assert(dT.editor.bookmarks.has(bmLine), "文本视图 toggleBookmark 仍可用（先清空再切换）");
+      SN.cmd.gotoBookmark(1);
+      SN.cmd.clearBookmarks();
+      assert(dT.editor.bookmarks.size === 0, "文本视图清书签仍可用");
+      SN.app.settings.showSpaces = true;
+      SN.cmd.toggleSpaces();
+      assert(dT.editor.showSpaces === SN.app.settings.showSpaces, "文本视图显示空白开关仍落到编辑器");
+      SN.cmd.zoom(10);
+      assert(dT.editor.zoom === SN.app.zoomPct, "文本视图缩放仍落到编辑器，zoom=" + dT.editor.zoom);
+      SN.cmd.wordHighlight("needle");
+      assert(dT.editor.wordRanges.length > 0, "文本视图双击词高亮仍可用");
+      SN.cmd.markKeyword();
+      assert(dT.editor.markRecords.length > 0, "文本视图「全部标记(面板关键字)」仍可用");
+      // 剪贴板走 textarea 的原生 execCommand：桩里没有该方法，注入一个假的验证转发链
+      const savedExec = documentStub.execCommand;
+      let execCalled = "";
+      documentStub.execCommand = (a) => { execCalled = a; return true; };
+      assert(SN.views.invoke("clipboard", "clipboard", dT, ["copy"]) === true && execCalled === "copy",
+        "文本视图剪贴板经适配器走到 execCommand(copy)");
+      documentStub.execCommand = savedExec;
+      SN.setMsg("");
+      assert(SN.views.invoke("clipboard", "clipboard", dT, ["copy"]) === false, "桩里没有 execCommand 时不抛、按未执行返回");
+      SN.cmd.edStatus();
+      const posText = String(documentStub.querySelector("#posLabel").textContent);
+      assert(posText.indexOf("Ln:") === 0, "文本视图行列统计仍上报到状态栏，实际=" + JSON.stringify(posText));
+      SN.app.activeId = "bigA";
+      SN.refreshMenus();
+    }
+
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言
     SN.app.docs = SN.app.docs.filter(d => d.id !== hexDoc.id);
     SN.app.activeId = "bigA";

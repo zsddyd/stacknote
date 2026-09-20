@@ -1195,22 +1195,13 @@
   });
 
   // ============ 简单的编辑命令入口（具体由 app2 补全） ============
+  // 命令层只做能力转发：撤销/重做与剪贴板都由视图适配器实现（文本视图=编辑器，见 app2.js），
+  // 当前视图没实现时按能力表给出统一原因（不再各自写一遍 setMsg）
   function edCmd(name) {
-    const ed = activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("undo", activeDoc())); return; }
-    if (name === "undo") ed.undo();
-    else if (name === "redo") ed.redo();
+    SN.views.invoke("undo", name === "redo" ? "redo" : "undo", activeDoc());
   }
   function execNative(cmdName) {
-    const ed = activeEditor();
-    if (!ed) { setMsg(SN.caps.reason("clipboard", activeDoc())); return; }
-    ed.ta.focus();
-    document.execCommand(cmdName);
-    if (cmdName === "cut" || cmdName === "paste") {
-      setTimeout(() => {
-        if (ed.onChange) ed.onChange(ed.text, ed);
-      }, 0);
-    }
+    SN.views.invoke("clipboard", "clipboard", activeDoc(), [cmdName]);
   }
 
   // 文件/编辑子命令占位，app2 覆盖
