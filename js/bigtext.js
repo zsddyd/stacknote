@@ -3,7 +3,7 @@
   const SN = window.SN;
   const el = SN.el;
 
-  const ROW_H = 22;         // 与编辑器行高一致
+  const ROW_H = 22;         // 100% 时的行高基准（与编辑器同公式，见 SN.zoomMetrics）
   const OVERSCAN = 16;
   const MAX_INDEX_LINES = 3 * 1000 * 1000; // 行数索引上限
   const ROW_SLICE_CAP = 1024 * 1024;       // 单行解码上限（超长行截断展示）
@@ -169,18 +169,26 @@
     let hlKw = "";                          // 双击选中的单词（临时高亮）
     doc.bigMarks = doc.bigMarks || [];      // 持久标记（查找→标记颜色），[{keyword,color}]
     let bigSel = "";                        // 本视图内最近一次有效选中文本（右键/抢焦点把选区折叠掉也不清空）
+    // 缩放：行高是虚拟滚动的命脉（行位、内容高度、定位、行列都按它算），
+    // 所以统一放在 rowH 这一个变量上，取值用 SN.zoomMetrics 与编辑器同公式；
+    // 首次打开沿用当前全局缩放（doc.bigZoom || app.zoomPct），并把生效值记回 doc
+    const initZoom = Math.max(50, Math.min(250, doc.bigZoom || SN.app.zoomPct || 100));
+    doc.bigZoom = initZoom;
+    let rowH = SN.zoomMetrics(initZoom).lh;
+    viewport.style.fontSize = SN.zoomMetrics(initZoom).fs + "px";
+    viewport.style.lineHeight = rowH + "px";
     const langHint = SN.langById(doc.lang);
     const lineTxt = makeLineText(doc);
 
     function size() {
-      inner.style.height = (lc * ROW_H) + "px";
+      inner.style.height = (lc * rowH) + "px";
       paint();
     }
     function visible() {
-      const top = Math.max(0, Math.floor(viewport.scrollTop / ROW_H) - OVERSCAN);
+      const top = Math.max(0, Math.floor(viewport.scrollTop / rowH) - OVERSCAN);
       // clientHeight 缺席时按 0 处理：否则 Math.ceil(undefined/22)=NaN 会让可视行窗口变成 NaN，
       // 行循环一次都不执行（真实浏览器隐藏页面时 clientHeight=0，不受影响；这里防的是非 DOM 宿主）
-      const rows = Math.ceil((viewport.clientHeight || 0) / ROW_H) + OVERSCAN * 2;
+      const rows = Math.ceil((viewport.clientHeight || 0) / rowH) + OVERSCAN * 2;
       return { from: top, to: Math.min(lc - 1, top + rows) };
     }
     // 行节点池：滚动时只新建/更新进入视口的行，离开视口的行回收复用
@@ -189,7 +197,7 @@
     function makeRow() {
       const row = document.createElement("div");
       row.className = "bg-row";
-      row.style.cssText = "position:absolute;left:0;right:0;height:" + ROW_H + "px;white-space:pre;overflow:hidden;box-sizing:border-box;padding-left:4px";
+      row.style.cssText = "position:absolute;left:0;right:0;height:" + rowH + "px;white-space:pre;overflow:hidden;box-sizing:border-box;padding-left:4px";
       const no = document.createElement("span");
       no.className = "bg-ln";
       // 行号列的宽度不在内联里写死：与行号栏底色/分割线共用 css/sn.css 的 --bg-ln-w。
@@ -272,7 +280,7 @@
         }
         if (ent.row._i !== i) {
           ent.row._i = i;
-          ent.row.style.top = (i * ROW_H) + "px";
+          ent.row.style.top = (i * rowH) + "px";
           ent.no.textContent = doc.bigChunkMode ? (i * (doc.bigChunkSize / 1024)) + "K" : String(i + 1);
           renderLine(ent.code, lineTxt(i));
         }
@@ -294,10 +302,27 @@
 
     function gotoLine(n) {
       const i = Math.max(0, Math.min(lc - 1, n - 1));
-      viewport.scrollTop = i * ROW_H;
+      viewport.scrollTop = i * rowH;
       lastTop = -1;
       paint();
     }
+    // 缩放：只改渲染参数（字号/行高），不碰 doc.raw、不重新解码；
+    // 行高变了 → 旧行节点的 top/height 全部作废，直接丢弃行池重建（代价就是一屏可视行）
+    function applyZoom(pct) {
+      const z = Math.max(50, Math.min(250, pct || 100));
+      const m = SN.zoomMetrics(z);
+      doc.bigZoom = z;
+      rowH = m.lh;
+      viewport.style.fontSize = m.fs + "px";
+      viewport.style.lineHeight = rowH + "px";
+      invalidateRows();
+      freeRows.length = 0;      // 池里的节点是按旧行高建的，别复用
+      lastTop = -1;
+      size();                   // 重算内容高度并重画可视行
+      lastPos = "";
+      paintPos();
+    }
+    doc._bigApplyZoom = applyZoom;
     function refreshRows() {
       for (const [key, ent] of rowMap) renderLine(ent.code, lineTxt(key));
     }
@@ -362,7 +387,7 @@
     }
     function posText() {
       const total = doc.bigChunkMode ? (doc.bigChunks || lc) : (doc.bigLineCount || lc);
-      const first = Math.floor((viewport.scrollTop || 0) / ROW_H) + 1;
+      const first = Math.floor((viewport.scrollTop || 0) / rowH) + 1;
       // 实时选区优先，其次"菜单/抢焦点之前"的记录（与右键菜单以打开那一刻的选区为准同一原则）
       const sp = selSnapshot() || lastSelPos;
       if (sp && sp.selLen > 0) {
@@ -523,6 +548,8 @@
     jumpToLine: (doc, n) => { if (doc._bigJump) doc._bigJump(n); },
     // 行列定位（statusPos）：选中内容 → 起点行/列 + 已选统计；无选中 → 视口首行 + 总行数
     status: (doc) => { if (doc._bigPaintPos) doc._bigPaintPos(); return true; },
+    // 缩放（zoom）：改行高/字号并只重画可视行（O(可视行)，不动数据）
+    setZoom: (doc, pct) => { if (!doc._bigApplyZoom) return false; doc._bigApplyZoom(pct); return true; },
     selectionKeyword: (doc) => (doc.bigSelected && doc.bigSelected()) || "",
     clearMarks: (doc) => { if (doc.bigClearMarks) doc.bigClearMarks(); },
     markSelection: (doc, color) => {

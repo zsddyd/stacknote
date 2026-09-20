@@ -476,6 +476,8 @@
       onActive: () => activateDoc(doc.id)
     });
     ed.setText(doc.content || "");
+    // 新开的文档沿用当前缩放级别（缩放是全局设置；以前新文档总是回到 100%）
+    ed.applyZoom(app.zoomPct || 100);
     doc.editor = ed;
     page.appendChild(ed.wrapEl);
     return true;

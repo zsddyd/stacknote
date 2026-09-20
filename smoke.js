@@ -1257,7 +1257,6 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       expectReason("书签切换", "bookmark", () => SN.cmd.toggleBookmark());
       expectReason("书签跳转", "bookmark", () => SN.cmd.gotoBookmark(1));
       expectReason("清除书签", "bookmark", () => SN.cmd.clearBookmarks());
-      expectReason("缩放", "zoom", () => SN.cmd.zoom(10));
       expectReason("显示空白", "view", () => SN.cmd.toggleSpaces());
       expectReason("查找下一个", "findStep", () => { SN.app.findOpt.keyword = "needle"; SN.dlg.findNext(); });
       // 面板"全部标记"：mark 能力在大文件视图是支持的，但该子动作只有编辑器实现 →
@@ -1393,11 +1392,12 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(/^Ln:1（视口首行）/.test(pos()), "显式左键点空白后回到视口首行，实际=" + JSON.stringify(pos()));
 
       // 滚动后"视口首行"跟着变（只依赖 scrollTop，O(1)）
-      viewportNode.scrollTop = 2 * 22;
+      // 用视图自己的定位接口，而不是写死像素：行高随缩放变化（见 ⑰）
+      big._bigJump(3);
       sandbox.window.getSelection = savedSel;
       SN.cmd.edStatus();
       assert(/^Ln:3（视口首行）/.test(pos()), "滚动到第 3 行位置后显示 Ln:3，实际=" + JSON.stringify(pos()));
-      viewportNode.scrollTop = 0;
+      big._bigJump(1);
 
       // 非活动文档不抢状态栏（避免后台视图刷掉当前文档的位置信息）
       SN.app.activeId = "bigA";
@@ -1406,6 +1406,75 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(pos() === before, "非活动文档不写状态栏");
 
       SN.app.docs = SN.app.docs.filter(x => x.id !== big.id);
+    }
+
+    // ⑰ 大文件视图的 zoom（缩放）：只改行高/字号并重画可视行，且与编辑器同一套数值
+    {
+      const big = {
+        id: "zoomBig", name: "zoom.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("one\ntwo\nthree\nfour\nfive\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 30));
+      const bigView = big.pageEl.children[0];
+      const viewportNode = bigView.children[0];
+      const innerNode = viewportNode.children[0];
+      viewportNode.clientHeight = 240;
+      assert(SN.caps.can("zoom", big) && typeof SN.views.byKind("big").setZoom === "function",
+        "大文本视图声明并实现了缩放");
+      assert(!SN.caps.can("zoom", { kind: "hex" }), "Hex 视图仍不支持缩放");
+
+      // 公式与编辑器同源：同一缩放级别下行高必须一致，否则切标签会看到行高跳变
+      const m150 = SN.zoomMetrics(150);
+      assert(m150.fs === 21 && m150.lh === 33, "SN.zoomMetrics(150) = 21px/33px，实际=" + m150.fs + "/" + m150.lh);
+      const dTz = SN.app.docs.filter(x => x.editor)[0];
+      dTz.editor.applyZoom(150);
+      assert(dTz.editor._lineH === m150.lh, "编辑器与大文件视图在 150% 下行高一致，实际=" + dTz.editor._lineH);
+      dTz.editor.applyZoom(100);
+
+      // 走真实命令路径：cmd.zoom(50) → app.zoomPct=150 → 广播到所有文档
+      SN.app.zoomPct = 100;
+      SN.cmd.zoom(50);
+      assert(SN.app.zoomPct === 150 && big.bigZoom === 150, "cmd.zoom 广播到活动的大文件文档，bigZoom=" + big.bigZoom);
+      assert(viewportNode.style.fontSize === "21px" && viewportNode.style.lineHeight === "33px",
+        "只读视图字号/行高按缩放改写，实际=" + viewportNode.style.fontSize + "/" + viewportNode.style.lineHeight);
+      // 行索引就绪后内容高度 = 行数 × 行高（行高变了必须重算，否则滚动位置全错）
+      await new Promise(r => setTimeout(r, 20));
+      const wantH = ((big.bigLineCount || 1) * m150.lh) + "px";
+      assert(innerNode.style.height === wantH, "内容高度按新行高重算，实际=" + innerNode.style.height + " 期望=" + wantH);
+      // 行节点是按行高建的，缩放后必须重建（复用了旧行高的节点会错位）
+      const row1 = SN.menu.firstDescendant(bigView, n => n._i === 0);
+      // 行高是通过 cssText 写进去的（桩不解析 cssText 的属性，只能整体包含判断）
+      assert(row1 && String(row1.style.cssText).indexOf("height:33px") >= 0,
+        "缩放后重画的行节点用新行高，实际=" + (row1 && row1.style.cssText));
+      // 定位/行列读数也跟着新行高走
+      big._bigJump(4);
+      SN.cmd.edStatus();
+      assert(String(documentStub.querySelector("#posLabel").textContent).indexOf("Ln:4") === 0,
+        "缩放到 150% 后定位到第 4 行仍然正确，实际=" + documentStub.querySelector("#posLabel").textContent);
+
+      // 缩回 100%：行高与内容高度回到基准
+      SN.cmd.zoom(-50);
+      assert(SN.app.zoomPct === 100 && big.bigZoom === 100 && viewportNode.style.lineHeight === "22px",
+        "缩回 100% 行高回到 22px，实际=" + viewportNode.style.lineHeight);
+
+      // 新开的文档沿用当前缩放（缩放是全局设置）
+      SN.cmd.zoom(50);                                  // → 150%
+      const big2 = {
+        id: "zoomBig2", name: "zoom2.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("x\ny\n")
+      };
+      SN.addDoc(big2);
+      assert(big2.bigZoom === 150, "新开的大文件文档沿用当前缩放级别，实际=" + big2.bigZoom);
+      const dtNew = { id: "zoomTxt", name: "z.txt", path: "z.txt", eol: "lf", lang: "txt", dirty: false,
+        kind: "text", enc: "utf8", readOnly: false, raw: null, content: "", size: 0 };
+      SN.addDoc(dtNew);
+      assert(dtNew.editor && dtNew.editor._lineH === SN.zoomMetrics(150).lh,
+        "新开的文本文档也沿用当前缩放，实际=" + (dtNew.editor && dtNew.editor._lineH));
+      SN.app.zoomPct = 100;
+      SN.cmd.zoom(0);                                   // 广播回 100%，避免影响后续段落
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id && x.id !== big2.id && x.id !== dtNew.id);
     }
 
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言

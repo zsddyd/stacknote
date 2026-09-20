@@ -367,9 +367,11 @@
 
     applyZoom(zoom) {
       this.zoom = zoom;
-      const fs = Math.round(14 * zoom / 100);
+      // 字号/行高公式抽到 SN.zoomMetrics：大文件只读视图是逐行自绘的，必须用同一套数值，
+      // 否则同一个缩放级别下两种视图行高不一致（切换标签时能明显看出来）
+      const m = SN.zoomMetrics(zoom);
+      const fs = m.fs, lh = m.lh;
       this._fontSize = fs;
-      const lh = Math.round(fs * 1.55);
       const st = this.ta.style;
       st.fontSize = fs + "px";
       st.lineHeight = lh + "px";
@@ -599,4 +601,9 @@
 
   SN.Editor = Editor;
   SN.EDITOR_MAX_HL = MAX_HL;
+  // 缩放唯一的字号/行高换算（编辑器与大文件只读视图共用）：14px 基准、行高 1.55，取整避免半像素缝
+  SN.zoomMetrics = function (pct) {
+    const fs = Math.round(14 * (pct || 100) / 100);
+    return { fs, lh: Math.round(fs * 1.55) };
+  };
 })();
