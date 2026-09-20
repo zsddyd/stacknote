@@ -1092,6 +1092,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         "大文件右键「标记颜色」把目标词标记出来，实际=" + JSON.stringify(big.bigMarks));
       assert(big.bigMarks[0].color === SN.app.MARK_COLORS[3], "标记用的是刚点的那个颜色");
       SN.menu.closeCtx();
+      // 大文件视图的行号栏要有底色与分割线：行节点会被虚拟滚动复用，靠的是单独一条铺满高度
+      // 的装饰层（.bg-gutter），所以要断言它确实存在且只有一条
+      const strips = byClass(big.pageEl, "bg-gutter");
+      assert(strips.length === 1, "大文件视图有且只有一条行号栏底色/分割线层，实际=" + strips.length);
       SN.app.docs = SN.app.docs.filter(d => d.id !== big.id);
     }
 
@@ -1103,6 +1107,18 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(/\.mi\.sep\{[^}]*cursor:default/.test(css), "分隔线用默认光标（不再是手型）");
       assert(/\.mi\.sep\{[^}]*pointer-events:none/.test(css), "分隔线不参与 hover（划过时上一项保持高亮）");
       assert(/#ctxmenu \.mi\.sep\{padding:0\}/.test(css), "右键菜单里分隔线不带条目内边距（否则会变成粗条）");
+      // 大文件行号栏：底色/分割线必须来自主题变量，且「行号列宽」必须单一来源
+      // （两边各写一个宽度就是上一版分割线压到首字符的原因）
+      assert(/\.bg-gutter\{[^}]*background:var\(--ed-gutter-bg\)/.test(css),
+        "大文件行号栏用主题的行号槽底色（--ed-gutter-bg）");
+      assert(/\.bg-gutter\{[^}]*border-right:1px solid var\(--border\)/.test(css),
+        "大文件行号栏与正文之间有 1px 分割线");
+      assert(/\.bg-gutter\{[^}]*position:absolute/.test(css), "行号栏装饰层用绝对定位铺满内容高度");
+      assert(/\.bigview\{--bg-ln-w:/.test(css), "行号列宽由 --bg-ln-w 定义（作用域在大文件视图上）");
+      assert(/\.bg-ln\{[^}]*width:var\(--bg-ln-w\)/.test(css), "行号 span 的宽度来自 --bg-ln-w");
+      assert(/\.bg-gutter\{[^}]*width:var\(--bg-ln-w\)/.test(css), "分割线层的宽度来自同一个 --bg-ln-w");
+      const bigSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
+      assert(bigSrc.indexOf("width:64px") < 0, "bigtext.js 不再硬编码行号列宽：内联 width 会盖掉 CSS 造成错位");
     }
 
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言

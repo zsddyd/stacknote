@@ -156,6 +156,10 @@
     // 视口
     const viewport = el("div", { class: "bg-viewport", style: "flex:1;overflow:auto;position:relative;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:14px;line-height:22px" });
     const inner = el("div", { class: "bg-inner", style: "position:relative" });
+    // 行号栏底色 + 与正文的分割线：文本视图由 .ed-gutter 提供，大文件视图的行号是「每行一个 .bg-ln」，
+    // 行节点会被虚拟滚动复用/回收，不能靠每行自己画线；这里单独铺一条铺满内容高度的底色层。
+    // 先插入，后插入的行节点始终画在它上面（行本身透明，底色从这层透出来）。
+    inner.appendChild(el("div", { class: "bg-gutter" }));
     viewport.appendChild(inner);
     page.appendChild(viewport);
 
@@ -186,7 +190,8 @@
       row.style.cssText = "position:absolute;left:0;right:0;height:" + ROW_H + "px;white-space:pre;overflow:hidden;box-sizing:border-box;padding-left:4px";
       const no = document.createElement("span");
       no.className = "bg-ln";
-      no.style.cssText = "display:inline-block;width:64px;color:var(--ed-line-num);text-align:right;padding-right:8px;user-select:none";
+      // 行号列的宽度不在内联里写死：与行号栏底色/分割线共用 css/sn.css 的 --bg-ln-w。
+      // （内联 width 会盖掉 CSS，两边各写一个数值就会错位——上一版分割线压到首字符就是这么来的）
       const code = document.createElement("span");
       row.appendChild(no);
       row.appendChild(code);
