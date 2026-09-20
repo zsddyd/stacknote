@@ -288,7 +288,13 @@
     // 二进制视图：不解码正文，保留原始字节，编码栏用 utf8 占位
     open: { readOnly: true, keepRawBytes: true, decodeMode: "none", fallbackEnc: "utf8" },
     render: (doc, page) => { page.appendChild(buildHexView(doc)); return true; },
-    exportBytes: (doc) => { SN.download(doc.name + ".hex", new Blob([doc.raw])); }
+    exportBytes: (doc) => { SN.download(doc.name + ".hex", new Blob([doc.raw])); },
+    // 右键菜单：Hex 视图只支持导出原始字节 / 切回可编辑文本 / 重命名（见 js/viewcaps.js）
+    contextMenu: (doc) => [
+      { label: "导出原始文件", requires: "exportBytes", action: () => SN.cmd.downloadDoc(doc.id) },
+      { label: "以文本模式重载", requires: "reloadAsText", action: () => SN.cmd.reloadAs(doc.id, "text") },
+      { label: "重命名…", requires: "rename", action: () => SN.cmd.renameDoc(doc.id) }
+    ]
   });
   function updateStatusLabel() {
     const d = SN.activeDoc();
@@ -599,21 +605,7 @@
         row.dataset.start = r.start;
         row.dataset.end = r.end;
         row.dataset.line = r.line;
-        row.addEventListener("click", () => {
-          SN.activateDoc(r.docId);
-          const ad = SN.activeDoc();
-          const ed = SN.activeEditor();
-          // 无编辑器（大文本只读）：交给该视图适配器定位到命中行
-          if (!ed && ad && r.line) { const view = SN.views.of(ad); if (view.jumpToLine) { view.jumpToLine(ad, r.line); return; } }
-          if (ed) {
-            if (r.start !== undefined && r.end !== undefined && r.start !== null) {
-              ed._setTextWithSel(ed.text, r.start, r.end); ed.scrollToPos(r.start);
-            } else if (r.line) {
-              ed.gotoLine(r.line);
-            }
-            ed.focus();
-          }
-        });
+        row.addEventListener("click", () => jumpResultRow(row));
         g.body.appendChild(row);
       }
       view.appendChild(g.group);
@@ -624,6 +616,62 @@
     if (!t.trim()) { setMsg("没有可复制的查找结果"); return; }
     navigator.clipboard.writeText(t).then(() => setMsg("已复制查找结果"));
   };
+
+  // ============ 查找结果右键菜单（#resultView 上的统一委托） ============
+  // 行内跳转逻辑与左键点击同源：jumpResultRow 同时服务 click 与右键「跳转到该行」
+  function jumpResultRow(row) {
+    const docId = SN.menu.dataOf(row, "doc");
+    const start = SN.menu.dataOf(row, "start");
+    const end = SN.menu.dataOf(row, "end");
+    const line = parseInt(SN.menu.dataOf(row, "line"), 10);
+    SN.activateDoc(docId);
+    const ad = SN.activeDoc();
+    const ed = SN.activeEditor();
+    // 无编辑器（大文本只读）：交给该视图适配器定位到命中行
+    if (!ed && ad && line) { const view = SN.views.of(ad); if (view.jumpToLine) { view.jumpToLine(ad, line); return; } }
+    if (!ed) return;
+    if (start !== undefined && end !== undefined && start !== null && start !== "") {
+      ed._setTextWithSel(ed.text, +start, +end); ed.scrollToPos(+start);
+    } else if (line) {
+      ed.gotoLine(line);
+    }
+    ed.focus();
+  }
+  // 结果行里除行号（.lnn）之外的那段文本，就是命中内容
+  function resultRowText(row) {
+    for (const c of (row.children || [])) {
+      if (!SN.menu.hasClass(c, "lnn")) return c.textContent || "";
+    }
+    return row.textContent || "";
+  }
+  SN.menu.register("#resultView", {
+    match: (n) => SN.menu.hasClass(n, "res-row") || SN.menu.hasClass(n, "res-sec"),
+    items: (n) => {
+      if (SN.menu.hasClass(n, "res-row")) {
+        const line = parseInt(SN.menu.dataOf(n, "line"), 10) || 0;
+        const text = resultRowText(n);
+        return [
+          { label: "跳转到该行", action: () => jumpResultRow(n) },
+          "-",
+          { label: "复制该行文本", action: () => SN.menu.copyText(text).then(ok => setMsg(ok ? "已复制该行" : "浏览器未允许写入剪贴板")) },
+          { label: "复制行号+文本", action: () => SN.menu.copyText("行 " + line + ": " + text).then(ok => setMsg(ok ? "已复制" : "浏览器未允许写入剪贴板")) },
+          { label: "复制全部结果", action: () => cmd.copyResultDock() }
+        ];
+      }
+      // 分组头：折叠/展开该组（复用 resultGroup 里的同一个开关）+ 复制该文件结果
+      const group = SN.menu.upFrom(n, x => SN.menu.hasClass(x, "res-group"));
+      const body = group ? SN.menu.firstDescendant(group, x => SN.menu.hasClass(x, "res-body")) : null;
+      return [
+        { label: "折叠/展开该组", disabled: !(n && n._toggleGroup), action: () => { if (n._toggleGroup) n._toggleGroup(); } },
+        { label: "复制该文件结果", disabled: !body, action: () => {
+          const t = body ? (body.textContent || "") : "";
+          if (!t.trim()) { setMsg("没有可复制的结果"); return; }
+          SN.menu.copyText(t).then(ok => setMsg(ok ? "已复制该文件结果" : "浏览器未允许写入剪贴板"));
+        } }
+      ];
+    },
+    ctx: () => ({ doc: SN.activeDoc() })
+  });
 
   // ============ 其它对话框 ============
   dlg.gotoLine = function () {

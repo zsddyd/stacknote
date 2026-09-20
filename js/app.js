@@ -43,29 +43,17 @@
   const menubar = SN.$("#menubar");
   const toolbar = SN.$("#toolbar");
 
-  let nestedPop = null, nestedState = null;
-  function closeNestedPop() {
-    if (nestedPop) { nestedPop.remove(); nestedPop = null; nestedState = null; }
+  // 顶栏下拉的子菜单/渲染器统一由 js/menu.js 提供（右键菜单共用同一套，不再各写一份）
+  function menuCtx() {
+    return {
+      doc: activeDoc(),
+      onClose: closeMenus,
+      onRebuild: () => SN.menu.rebuildSub(),
+      // palette 项（标记颜色）的来源：颜色列表由本文件提供（app.MARK_COLORS）
+      paletteSource: () => markColorItems
+    };
   }
-  function openNestedPop(source, anchorRect) {
-    closeNestedPop();
-    const pop = el("div", { class: "menu-pop" });
-    fillDrop(pop, typeof source === "function" ? source() : source);
-    document.body.appendChild(pop);
-    nestedPop = pop;
-    nestedState = { source, rect: anchorRect };
-    const r = anchorRect;
-    const pw = pop.offsetWidth || Math.min(280, Math.max(180, window.innerWidth - r.right - 20));
-    let x = r.right + 2;
-    if (x + pw > window.innerWidth - 4) x = Math.max(4, r.left - pw - 2);
-    let y = r.top;
-    if (y + pop.offsetHeight > window.innerHeight - 6) y = Math.max(4, window.innerHeight - pop.offsetHeight - 6);
-    pop.style.left = x + "px";
-    pop.style.top = y + "px";
-  }
-  function rebuildNestedPop() {
-    if (nestedState) openNestedPop(nestedState.source, nestedState.rect);
-  }
+  function closeNestedPop() { SN.menu.closeSub(); }
   function closeMenus() {
     closeNestedPop();
     SN.$$(".menu-root.open").forEach(m => m.classList.remove("open"));
@@ -103,60 +91,10 @@
     };
   }
 
+  // 下拉/弹层的内容渲染统一走 SN.menu.renderInto（js/menu.js）：
+  // 快捷键提示、能力置灰与 tooltip、子菜单、勾选/色块都只有一处实现，右键菜单复用同一份
   function fillDrop(dd, items) {
-    dd.textContent = "";
-    for (const it of items) {
-      if (it === "-") { dd.appendChild(el("div", { class: "mi sep" })); continue; }
-      if (it.sub || it.palette) {
-        const row = el("div", { class: "mi", "data-sub": 1 });
-        row.appendChild(el("span", { text: it.label }));
-        row.appendChild(el("span", { class: "caret", text: "›" }));
-        row.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const src = it.palette ? () => markColorItems() : it.sub;
-          openNestedPop(src, row.getBoundingClientRect());
-        });
-        dd.appendChild(row);
-        continue;
-      }
-      const mi = el("div", { class: "mi" });
-      if (it.disabled) mi.classList.add("disabled");
-      if (it.swatch) {
-        const sw = el("span", { class: "sw" });
-        sw.style.background = it.swatch;
-        mi.appendChild(sw);
-      }
-      if (it.checked !== undefined) {
-        mi.appendChild(el("span", { text: it.checked ? "☑" : "☐" }));
-      }
-      mi.appendChild(el("span", { text: it.label || "" }));
-      // 快捷键提示与点击行为统一取 SN.shortcuts 表（js/shortcuts.js）：
-      // 有 sc 的菜单项，显示与执行都来自同一处定义，不会出现「菜单写的键」与「实际按的键」脱节。
-      // where 为 native 的项（剪切/复制/粘贴/全选）表里没有 run，菜单自带 action 走 execNative。
-      const scDef = it.sc ? SN.shortcuts.byId(it.sc) : null;
-      const accel = it.sc ? SN.shortcuts.accelOf(it.sc) : it.accel;
-      if (accel) mi.appendChild(el("span", { class: "accel", text: accel }));
-      // 视图能力（js/viewcaps.js）：当前文档不具备所需能力时置灰，
-      // 并把「为什么不可用」写进 tooltip，取代点下去毫无反应的旧行为。
-      const req = it.requires || (scDef && scDef.requires);
-      const blockedWhy = req && SN.caps ? SN.caps.reason(req, activeDoc()) : "";
-      if (blockedWhy) mi.classList.add("disabled");
-      const tip = blockedWhy || it.tip;
-      if (tip) mi.title = tip;
-      const act = it.action || (scDef && scDef.run ? scDef.run : null);
-      if (!it.disabled && !blockedWhy && act) mi.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (it.stay) {
-          act();
-          if (it.rebuild) rebuildNestedPop();
-        } else {
-          closeMenus();
-          act();
-        }
-      });
-      if (it.id) mi.dataset.id = it.id;
-      dd.appendChild(mi);
-    }
+    SN.menu.renderInto(dd, items, menuCtx());
   }
 
   // ============ 菜单模型 ============
@@ -363,17 +301,24 @@
       { label: "清除全部书签", requires: "bookmark", action: () => cmd.clearBookmarks() }
     ];
   }
-  function markColorItems() {
+  // sel（可选）：右键菜单在打开那一刻捕获的选区 {start,end}。
+  // 菜单会抢焦点、部分浏览器右键还会折叠光标，届时「当前选区」已空 ——
+  // 所以先把这段选区还原回编辑器，再走与顶栏/工具栏完全一致的高亮路径。
+  function markColorItems(sel) {
     return app.MARK_COLORS.map((c, i) => ({
       label: "颜色 " + (i + 1), swatch: c, checked: app.curMarkColor === c,
       stay: true, rebuild: true,
       action: () => {
         app.curMarkColor = c; app.settings.markColorIdx = i; saveSettings();
-        // 是否有可标记的选中内容由视图适配器判断（编辑器选区 / 大文件视图内最近一次选中），
-        // 连续换色即用新颜色重新高亮
         const d = SN.activeDoc();
+        // 右键菜单：把打开菜单时的选区还给编辑器（只移动选区，不重写文本，O(1)）
+        if (sel && d && d.editor) {
+          try { d.editor.ta.focus(); d.editor.ta.setSelectionRange(sel.start, sel.end); } catch (e) { /* ignore */ }
+        }
+        // 有可标记内容就标记；没有则明确说一句，避免「点了没反应」
         const kw = d ? SN.views.of(d).selectionKeyword(d) : "";
-        if (kw && SN.cmd.markSelected) SN.cmd.markSelected();
+        if (kw && SN.cmd.markSelected) { SN.cmd.markSelected(); return; }
+        setMsg("标记颜色：请先选中要高亮的内容（双击选词，或拖选一段）");
       }
     }));
   }
@@ -459,7 +404,7 @@
       activateDoc(doc.id);
     });
     x.addEventListener("click", (e) => { e.stopPropagation(); cmd.closeTab(doc.id); });
-    tab.addEventListener("contextmenu", (e) => { e.preventDefault(); tabMenu(e, doc); });
+    // 标签右键由 #tabstrip 上的统一委托处理（见「右键菜单」段），这里不再逐项挂监听
     return tab;
   }
 
@@ -477,20 +422,22 @@
     });
   }
 
-  function tabMenu(e, doc) {
-    const html = [
-      ["关闭当前文档", () => cmd.closeTab(doc.id)],
-      ["关闭其它文档", () => cmd.closeOthers(doc.id)],
-      ["关闭全部", () => cmd.closeAll()],
+  // 文档级右键菜单（标签栏与文件列表共用同一份，避免两处各写一套）
+  // 注意 reloadAs 的实现是 cmd.reloadAs（app2.js），此前这里写成裸标识符会抛 ReferenceError
+  function docMenuItems(doc) {
+    return [
+      { label: "关闭当前文档", action: () => cmd.closeTab(doc.id) },
+      { label: "关闭其它文档", action: () => cmd.closeOthers(doc.id) },
+      { label: "关闭全部", action: () => cmd.closeAll() },
       "-",
-      ["另存为…", () => cmd.saveAs(doc.id)],
-      ["重命名…", () => cmd.renameDoc(doc.id)],
-      ["以文本模式重载", () => reloadAs(doc.id, "text")],
-      ["以二进制(Hex)重载", () => reloadAs(doc.id, "hex")],
+      { label: "另存为…", requires: "save", action: () => cmd.saveAs(doc.id) },
+      { label: "重命名…", action: () => cmd.renameDoc(doc.id) },
       "-",
-      ["打开所在目录(下载源文件)", () => downloadDoc(doc.id)]
+      { label: "以文本模式重载", requires: "reloadAsText", action: () => cmd.reloadAs(doc.id, "text") },
+      { label: "以二进制(Hex)重载", action: () => cmd.reloadAs(doc.id, "hex") },
+      "-",
+      { label: "打开所在目录(下载源文件)", action: () => cmd.downloadDoc(doc.id) }
     ];
-    showCtx(e.clientX, e.clientY, html);
   }
 
   // 文本视图适配器：Editor 的构造依赖本文件内部回调（改动标记、状态栏、双击取词），故在此注册。
@@ -515,7 +462,17 @@
   SN.views.define("text", {
     render: renderTextPage,
     jumpToLine: (doc, n) => { if (doc.editor) doc.editor.gotoLine(n); },
-    selectionKeyword: (doc) => (doc.editor && doc.editor.hasSelection() ? doc.editor.selectedText().trim() : "")
+    // 「当前选区优先，否则回退最近一次有效选区」：右键菜单抢焦点、浏览器右键折叠光标后仍能标记，
+    // 否则「标记颜色」会因为拿到空选区而静默失效（用户观感就是点了没反应）
+    selectionKeyword: (doc) => {
+      const ed = doc.editor;
+      if (!ed) return "";
+      if (ed.hasSelection()) return ed.selectedText().trim();
+      if (ed.effectiveSelectedText) return ed.effectiveSelectedText().trim();
+      return "";
+    },
+    // 右键菜单由本文件提供（正文与行号栏两个变体）
+    contextMenu: (doc, e) => textEditorMenuItems(doc, e)
   });
 
   // 页面渲染统一入口：具体怎么做交给视图适配器，这里不再出现 if (doc.kind === ...)
@@ -821,6 +778,8 @@
     if (!SN.caps.can("edit", d)) { SN.views.of(d).exportBytes(d); return; }
     cmd.saveAs(id);
   }
+  // 公开给右键菜单（大文本/Hex 视图的「导出原始文件」）
+  cmd.downloadDoc = downloadDoc;
 
   cmd.closeTab = async function (id) {
     const d = id ? docById(id) : activeDoc();
@@ -907,6 +866,8 @@
       head.textContent = (collapsed ? "▸ " : "▾ ") + label;
     };
     const toggle = () => paint(!group.classList.contains("collapsed"));
+    // 右键菜单要复用同一个折叠开关（smoke 的 DOM 桩里 click() 是空实现，故显式留句柄）
+    head._toggleGroup = toggle;
     head.addEventListener("click", toggle);
     head.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
@@ -982,22 +943,198 @@
   }
   window.closeModal = closeModal;
 
+  // 右键菜单统一入口（旧签名 showCtx(x, y, [[label, fn], ...]) 仍兼容）
   function showCtx(x, y, items) {
-    const c = SN.$("#ctxmenu");
-    c.textContent = "";
-    c.classList.remove("hidden");
-    for (const it of items) {
-      if (it === "-") { c.appendChild(el("div", { class: "mi sep" })); continue; }
-      const mi = el("div", { class: "mi", text: it[0] });
-      mi.addEventListener("click", () => { c.classList.add("hidden"); it[1](); });
-      c.appendChild(mi);
-    }
-    const w = c.offsetWidth, h = c.offsetHeight;
-    c.style.left = Math.min(x, window.innerWidth - w - 4) + "px";
-    c.style.top = Math.min(y, window.innerHeight - h - 4) + "px";
-    document.addEventListener("click", hideCtx, { once: true });
+    const norm = (items || []).map(it => {
+      if (it === "-") return "-";
+      if (Array.isArray(it)) return { label: it[0], action: it[1] };
+      return it;
+    });
+    return SN.menu.openCtx(x, y, norm, menuCtx());
   }
-  function hideCtx() { SN.$("#ctxmenu").classList.add("hidden"); }
+
+  // ============ 右键菜单（宿主委托 + 各作用面菜单模型） ============
+  // 每个宿主只挂 1 个 contextmenu 监听器（menu.js 里的 register/bindHosts），
+  // 菜单项一律在打开时即时构建：只查 SN.caps（数组查找），不扫描文本、不触发编辑器渲染。
+
+  // 文本视图：正文与行号栏给不同变体
+  // 把「打开菜单那一刻的选区」还给编辑器：菜单会抢焦点、部分浏览器右键还会折叠光标，
+  // 不还原的话大小写/行编辑/排序这类会从「作用于选中内容」退化成「作用于整篇或当前行」。
+  function restoreMenuSel(doc, sel) {
+    if (!sel || !doc || !doc.editor) return false;
+    try { doc.editor.ta.focus(); doc.editor.ta.setSelectionRange(sel.start, sel.end); return true; }
+    catch (e) { return false; }
+  }
+  // 递归给菜单项（含子菜单）的动作套一层「先还原选区」
+  function withMenuSel(doc, sel, items) {
+    if (!sel || !doc || !doc.editor) return items;
+    const wrap = (list) => (list || []).map(it => {
+      if (it === "-") return it;
+      const next = Object.assign({}, it);
+      if (Array.isArray(next.sub)) next.sub = wrap(next.sub);
+      else if (typeof next.sub === "function") {
+        const f = next.sub;
+        next.sub = () => wrap(f() || []);
+      }
+      if (next.action) {
+        const a = next.action;
+        next.action = () => { restoreMenuSel(doc, sel); a(); };
+      }
+      return next;
+    });
+    return wrap(items);
+  }
+
+  function textEditorMenuItems(doc, e) {
+    const ed = doc.editor;
+    // 菜单在「打开那一刻」确定操作对象：当前选区，或最近一次有效选区（见 editor.js effectiveSelection）
+    const effSel = ed && ed.effectiveSelection ? ed.effectiveSelection() : null;
+    const hasSel = !!effSel;
+    const inGutter = !!SN.menu.upFrom(e.target, n => SN.menu.hasClass(n, "ed-gutter"));
+    if (inGutter) {
+      return [
+        { label: "书签", sub: bookMarkItems() },
+        { label: "行编辑", sub: lineItems() },
+        "-",
+        { label: "查找…", action: () => dlg.find({ scope: "doc" }) },
+        { label: "跳转行…", sc: "edit.goto" }
+      ];
+    }
+    // 只读文本视图（以文本模式打开的大文件等）：只留「看」与「标记」，不给编辑入口
+    if (doc.readOnly) {
+      return withMenuSel(doc, effSel, [
+        { label: "清除全部标记", requires: "mark", action: () => cmd.clearMarksAll() },
+        { label: "标记颜色", palette: true, requires: "mark", markSel: effSel },
+        "-",
+        { label: "查找…", action: () => dlg.find({ scope: "doc" }) },
+        { label: "跳转行…", sc: "edit.goto" }
+      ]);
+    }
+    // 所有动作统一先还原这段选区，再执行（见 withMenuSel）
+    return withMenuSel(doc, effSel, [
+      { label: "撤销", sc: "edit.undo" },
+      { label: "重做", sc: "edit.redo" },
+      "-",
+      // 不提供「粘贴」：脚本读剪贴板在 file:// 与部分浏览器上并不保证可用，
+      // 与其给一个可能失效的入口，不如明确留给 Ctrl+V（剪贴板策略由本项目约定）
+      { label: "剪切", sc: "edit.cut", disabled: !hasSel, action: () => ctxCut(doc) },
+      { label: "复制", sc: "edit.copy", disabled: !hasSel, action: () => ctxCopy(doc) },
+      { label: "全选", sc: "edit.selectAll", action: () => ctxSelectAll(doc) },
+      "-",
+      // 这里只放「清除全部标记」与调色板：整体性的「全部标记」属于查找面板/顶栏（右键菜单以选中内容为准，
+      // 而点颜色本身就已经标记了当前目标，两者语义重复）
+      { label: "清除全部标记", requires: "mark", action: () => cmd.clearMarksAll() },
+      // sel 传给调色板：点颜色时先把这段选区还原回编辑器，再走与顶栏一致的高亮路径
+      { label: "标记颜色", palette: true, requires: "mark", markSel: effSel },
+      "-",
+      { label: "大小写转换", sub: caseItems() },
+      { label: "行编辑", sub: lineItems() },
+      { label: "空白字符操作", sub: [
+        { label: "移除行首空白", requires: "edit", action: () => cmd.blankOp("head") },
+        { label: "移除行尾空白", requires: "edit", action: () => cmd.blankOp("end") },
+        { label: "移除首尾空白", requires: "edit", action: () => cmd.blankOp("both") },
+        "-",
+        { label: "TAB → 空格", requires: "edit", action: () => cmd.tabOp("tab2space") },
+        { label: "空格 → TAB(全部)", requires: "edit", action: () => cmd.tabOp("space2tabAll") },
+        { label: "空格 → TAB(行首)", requires: "edit", action: () => cmd.tabOp("space2tabLead") }
+      ]},
+      "-",
+      { label: "书签", sub: bookMarkItems() },
+      { label: "查找…", action: () => dlg.find({ scope: "doc" }) },
+      { label: "跳转行…", sc: "edit.goto" },
+      { label: "列块编辑…", sc: "edit.columnEdit" }
+    ]);
+  }
+
+  // 剪贴板：复制走 clipboard.writeText（失败回退 execCommand），剪切在写成功后才删（可撤销）
+  function ctxCopy(doc) {
+    const ed = doc.editor;
+    if (!ed) return;
+    const text = ed.effectiveSelectedText ? ed.effectiveSelectedText() : ed.selectedText();
+    if (!text) { setMsg("请先选中要复制的文本"); return; }
+    SN.menu.copyText(text).then(ok => setMsg(ok ? "已复制 " + text.length + " 字符" : "浏览器未允许写入剪贴板，请按 Ctrl+C"));
+  }
+  function ctxCut(doc) {
+    const ed = doc.editor;
+    if (!ed) return;
+    const r = ed.effectiveSelection ? ed.effectiveSelection() : null;
+    const text = r ? ed.ta.value.slice(r.start, r.end) : "";
+    if (!r || !text) { setMsg("请先选中要剪切的文本"); return; }
+    SN.menu.copyText(text).then(ok => {
+      if (!ok) { setMsg("浏览器未允许写入剪贴板，未执行剪切（可用 Ctrl+X）"); return; }
+      ed.replaceRange("", r.start, r.end);   // 自带 pushUndo + 置脏
+      setMsg("已剪切 " + text.length + " 字符");
+    });
+  }
+  function ctxSelectAll(doc) {
+    const ed = doc.editor;
+    if (!ed) return;
+    ed.ta.focus();
+    ed.ta.select();
+    ed._reportStatus();
+  }
+
+  // 状态栏：按落点给四种变体
+  function statusbarMenuItems(target) {
+    const hit = SN.menu.upFrom(target, n => n.id) || target;
+    const id = hit && hit.id;
+    if (id === "codeLabel") return encItems();
+    if (id === "langLabel") return langMenuItems();
+    if (id === "eolSel") {
+      return [
+        { label: "转为 Windows(CR+LF)", requires: "eolSwitch", action: () => cmd.eolConv("crlf") },
+        { label: "转为 Unix(LF)", requires: "eolSwitch", action: () => cmd.eolConv("lf") },
+        { label: "转为 Mac(CR)", requires: "eolSwitch", action: () => cmd.eolConv("cr") }
+      ];
+    }
+    return [
+      { label: "工具栏", checked: !SN.$("#toolbar").classList.contains("hidden"), action: () => cmd.toggleToolbar() },
+      { label: "文件列表窗口", checked: !SN.$("#fileDock").classList.contains("hidden"), action: () => cmd.toggleFileDock() },
+      { label: "查找结果面板", checked: !SN.$("#bottomDock").classList.contains("hidden"), action: () => cmd.toggleResultDock() },
+      "-",
+      { label: "放大", requires: "zoom", action: () => cmd.zoom(10) },
+      { label: "缩小", requires: "zoom", action: () => cmd.zoom(-10) },
+      { label: "重置为 100%", requires: "zoom", action: () => cmd.zoom(100 - (app.zoomPct || 100)) }
+    ];
+  }
+
+  // 宿主注册：编辑器区按「页 → 文档 → 该视图的 contextMenu」分派，具体菜单由各视图适配器提供
+  // 右键菜单的渲染上下文：palette 项（标记颜色）的来源只有本文件知道（app.MARK_COLORS）
+  function ctxMenuCtx(doc) {
+    // 调色板带上菜单项里冻结的选区（见 textEditorMenuItems 的 markSel）
+    return { doc: doc || activeDoc(), paletteSource: (it) => () => markColorItems(it && it.markSel) };
+  }
+  SN.menu.register("#editorZone", {
+    match: (n) => n.dataset && n.dataset.doc,
+    items: (page, e) => {
+      const doc = docById(SN.menu.dataOf(page, "doc"));
+      if (!doc) return null;
+      const ad = SN.views.of(doc);
+      return ad.contextMenu ? ad.contextMenu(doc, e) : null;
+    },
+    ctx: (page) => ctxMenuCtx(docById(SN.menu.dataOf(page, "doc")))
+  });
+  SN.menu.register("#tabstrip", {
+    match: (n) => SN.menu.dataOf(n, "id"),
+    items: (tab) => {
+      const doc = docById(SN.menu.dataOf(tab, "id"));
+      return doc ? docMenuItems(doc) : null;
+    },
+    ctx: (tab) => ctxMenuCtx(docById(SN.menu.dataOf(tab, "id")))
+  });
+  SN.menu.register("#fileList", {
+    match: (n) => SN.menu.dataOf(n, "id"),
+    items: (li) => {
+      const doc = docById(SN.menu.dataOf(li, "id"));
+      return doc ? docMenuItems(doc) : null;
+    },
+    ctx: (li) => ctxMenuCtx(docById(SN.menu.dataOf(li, "id")))
+  });
+  SN.menu.register("#statusbar", {
+    match: () => true,
+    items: (n) => statusbarMenuItems(n),
+    ctx: () => ctxMenuCtx()
+  });
 
   // ============ 简单的编辑命令入口（具体由 app2 补全） ============
   function edCmd(name) {
@@ -1065,6 +1202,8 @@
 
     buildAllMenus();
     buildToolbar();
+    // 右键菜单：宿主委托只在这里绑一次（每个宿主 1 个 contextmenu 监听器）
+    SN.menu.bindHosts();
     bindShortcuts();
     await loadRecent();
     applySettingsVisual();

@@ -49,10 +49,12 @@ label{user-select:none}
   box-shadow:0 6px 18px rgba(0,0,0,.28)}
 .mi .sw{display:inline-block;width:15px;height:12px;border:1px solid #999;border-radius:2px;vertical-align:-1px;flex:0 0 auto}
 .mi{display:flex;align-items:center;gap:8px;padding:3px 10px;cursor:pointer;white-space:nowrap}
-.mi:hover{background:var(--selection);color:#fff}
+/* 只有「能点的条目」才给 hover 高亮：分隔线与置灰项不该看起来像可选中/可焦点 */
+.mi:not(.sep):not(.disabled):hover{background:var(--selection);color:#fff}
 .mi .accel{margin-left:auto;color:var(--text-weak);font-size:11px}
-.mi:hover .accel{color:#eee}
-.mi.sep{border-top:1px solid var(--border);margin:3px 4px;padding:0}
+.mi:not(.sep):not(.disabled):hover .accel{color:#eee}
+/* 分隔线：不可点、不参与 hover（鼠标划过去时上一项的高亮保持不变，与系统菜单一致） */
+.mi.sep{border-top:1px solid var(--border);margin:3px 4px;padding:0;cursor:default;pointer-events:none}
 .mi.disabled{opacity:.4;cursor:not-allowed}
 .iconbt.disabled{opacity:.45;cursor:not-allowed}
 .mi .caret{margin-left:6px}
@@ -192,8 +194,13 @@ label{user-select:none}
 .toast{background:var(--panel2);border:1px solid var(--border);border-left:4px solid var(--accent);
   padding:6px 12px;border-radius:3px;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:420px}
 #ctxmenu{position:fixed;z-index:950;background:var(--panel2);border:1px solid var(--border);
-  box-shadow:0 6px 16px rgba(0,0,0,.3);min-width:170px;padding:3px}
+  box-shadow:0 6px 16px rgba(0,0,0,.3);min-width:170px;max-height:80vh;overflow:auto;padding:3px}
 #ctxmenu .mi{padding:4px 12px}
+/* 上面的内边距不能落到分隔线上（否则它会变成一条带内边距的粗条，像可选中项） */
+#ctxmenu .mi.sep{padding:0}
+/* 键盘导航高亮与 :hover 同款（菜单打开后焦点在 #ctxmenu 上，方向键移动） */
+#ctxmenu .mi.kb:not(.sep):not(.disabled){background:var(--selection);color:#fff}
+#ctxmenu .mi.kb:not(.sep):not(.disabled) .accel{color:#eee}
 .md-preview{flex:1;overflow:auto;padding:14px 18px;font-family:"Microsoft YaHei",sans-serif;background:var(--panel2)}
 .md-preview pre{background:var(--panel);padding:8px;border:1px solid var(--border);overflow:auto}
 .md-preview code{font-family:ui-monospace,Consolas,Menlo,monospace}

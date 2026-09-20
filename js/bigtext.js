@@ -164,7 +164,7 @@
     let lastTop = -1;
     let hlKw = "";                          // 双击选中的单词（临时高亮）
     doc.bigMarks = doc.bigMarks || [];      // 持久标记（查找→标记颜色），[{keyword,color}]
-    let bigSel = "";                        // 本视图内最近一次非空选中文本（点击菜单时不丢失）
+    let bigSel = "";                        // 本视图内最近一次有效选中文本（右键/抢焦点把选区折叠掉也不清空）
     const langHint = SN.langById(doc.lang);
     const lineTxt = makeLineText(doc);
 
@@ -297,14 +297,65 @@
       while (n) { if (n === page) return true; n = n.parentNode; }
       return false;
     }
-    // 记录本视图内的选区：菜单点击发生在页面外，不会清掉 bigSel（等效于 textarea 失焦保留选区）
+    // 记录本视图内的选区（等效于 textarea 失焦仍保留选区）：
+    // 关键点——折叠（右键、菜单抢焦点、点空白）**不改写记忆**，否则右键菜单拿到的永远是空选区，
+    // 「标记颜色/复制选中内容」会静默失效（提示「请先选中要高亮的文本」）。
     document.addEventListener("selectionchange", () => {
       const sel = window.getSelection && window.getSelection();
       if (!sel || !sel.anchorNode || !insidePage(sel.anchorNode)) return;
-      bigSel = sel.isCollapsed ? "" : (sel.toString() || "").trim();
-      if (bigSel.length > 4096) bigSel = "";
+      if (sel.isCollapsed) return;
+      const t = (sel.toString() || "").trim();
+      if (t && t.length <= 4096) bigSel = t;
+    });
+    // 左键点空白处＝有意取消选择，此时才清记忆（右键 mouseup 是 button=2，不动它）
+    page.addEventListener("mouseup", (e) => {
+      if (e && e.button !== undefined && e.button !== 0) return;
+      const sel = window.getSelection && window.getSelection();
+      if (sel && sel.isCollapsed) bigSel = "";
     });
     doc.bigSelected = () => bigSel;
+    // 右键菜单在打开那一刻把目标固定下来（见下方 contextMenu）：与文本视图「还原选区」等价
+    doc.bigSetSelected = (kw) => { bigSel = String(kw == null ? "" : kw).trim().slice(0, 4096); };
+    // 右键落点下的词：没选中任何内容时用它兜底，语义与「双击高亮该词」一致
+    doc._bigKeywordAt = (ev) => {
+      if (bigSel) return bigSel;
+      if (!ev) return "";
+      const pt = caretPointAt(ev.clientX, ev.clientY);
+      if (!pt || !pt.node || pt.node.nodeType !== 3) return "";
+      return wordFromTextNode(pt.node, pt.offset, ev.clientX);
+    };
+    // 从命中位置扩到词边界；额外用 Range 量文字实际左右边界，
+    // 避免「点在整行文字右侧的空白区」时误取行尾那个词
+    function wordFromTextNode(node, offset, x) {
+      const text = node.data || "";
+      const re = /[A-Za-z0-9_$#@.\-\u00c0-\uffff]/;
+      let s = offset, e = offset;
+      while (s > 0 && re.test(text[s - 1])) s--;
+      while (e < text.length && re.test(text[e])) e++;
+      if (s === e) return "";
+      try {
+        const r = document.createRange();
+        r.setStart(node, 0);
+        r.setEnd(node, text.length);
+        const rect = r.getBoundingClientRect ? r.getBoundingClientRect() : null;
+        if (rect && x !== undefined && x !== null && (x < rect.left - 2 || x > rect.right + 2)) return "";
+      } catch (err) { /* 量不出边界就不做这层额外判断 */ }
+      return text.slice(s, e).trim();
+    }
+    function caretPointAt(x, y) {
+      if (x === undefined || y === undefined) return null;
+      try {
+        if (typeof document.caretPositionFromPoint === "function") {
+          const p = document.caretPositionFromPoint(x, y);
+          if (p) return { node: p.offsetNode, offset: p.offset };
+        }
+        if (typeof document.caretRangeFromPoint === "function") {
+          const r = document.caretRangeFromPoint(x, y);
+          if (r) return { node: r.startContainer, offset: r.startOffset };
+        }
+      } catch (e) { /* 视口外/不支持的浏览器：当作没取到 */ }
+      return null;
+    }
     doc.bigAddMark = function (kw, color) {
       doc.bigMarks = doc.bigMarks || [];
       const idx = doc.bigMarks.findIndex(r => r.keyword === kw && r.color === color);
@@ -388,6 +439,34 @@
     exportBytes: (doc) => {
       if (doc.raw) SN.download(doc.name, new Blob([doc.raw]));
       else SN.toast("未保留原始字节");
+    },
+    // 右键菜单：只给本视图真能做的事（能力表 caps.big：查找/标记/跳转行/导出/重命名）
+    contextMenu: (doc, e) => {
+      // 打开菜单那一刻把目标定下来：优先已有选区，其次右键点下的词。
+      // 定下来后「标记颜色/复制选中内容」都作用于它，不受后续折叠/抢焦点影响。
+      const kw = (doc._bigKeywordAt ? doc._bigKeywordAt(e) : "") || "";
+      if (kw && doc.bigSetSelected) doc.bigSetSelected(kw);
+      const sel = (doc.bigSelected && doc.bigSelected()) || "";
+      return [
+        // 不给「全部标记」：点颜色就已经标记了当前目标，整体性入口留在查找面板/顶栏菜单
+        { label: "清除全部标记", requires: "mark", action: () => SN.cmd.clearMarksAll() },
+        { label: "标记颜色", palette: true, requires: "mark" },
+        "-",
+        { label: "查找…", action: () => SN.dlg.find({ scope: "doc" }) },
+        { label: "跳转行…", requires: "gotoLine", action: () => SN.dlg.gotoLine() },
+        "-",
+        {
+          label: "复制选中内容",
+          disabled: !sel,
+          tip: sel ? "" : "请先在大文件视图里选中要高亮的文本",
+          action: () => {
+            SN.menu.copyText(sel).then(ok => SN.setMsg(ok ? "已复制 " + sel.length + " 字符" : "浏览器未允许写入剪贴板"));
+          }
+        },
+        "-",
+        { label: "导出原始文件", requires: "exportBytes", action: () => SN.cmd.downloadDoc(doc.id) },
+        { label: "重命名…", requires: "rename", action: () => SN.cmd.renameDoc(doc.id) }
+      ];
     },
     // 跨文档查找用：原始字节走分块流式检索，返回 [{line, snippet}]
     search: async (doc, keyword, onProgress) => {

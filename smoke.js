@@ -125,7 +125,7 @@ const files = [
   "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
-  "js/textops.js", "js/app.js", "js/app2.js"
+  "js/textops.js", "js/menu.js", "js/app.js", "js/app2.js"
 ];
 for (const f of files) {
   const code = fs.readFileSync(path.join(__dirname, f), "utf8");
@@ -468,7 +468,8 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
   {
     const handlers = documentStub.handlers.keydown || [];
-    assert(handlers.length === 1, "已注册全局 keydown 监听，数量 = " + handlers.length);
+    // 两个：① 快捷键表分发（js/app.js bindShortcuts）② 右键菜单键盘导航（js/menu.js，闭菜单时立即返回）
+    assert(handlers.length === 2, "已注册全局 keydown 监听（快捷键分发 + 右键菜单导航），数量 = " + handlers.length);
     const saved = SN.dlg.find;
     const seen = [];
     SN.dlg.find = (o) => seen.push(o && o.scope);
@@ -795,6 +796,319 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     assert(bigGroups[0].classList.contains("collapsed"), "大文件单文件结果同样可折叠");
     bigHead.handlers.click[0]();
     assert(!bigGroups[0].classList.contains("collapsed"), "大文件结果再次单击可展开");
+  }
+
+  // ============ 右键菜单：宿主委托 / 视图分派 / 能力置灰 / O(1) 与无泄漏（js/menu.js） ============
+  {
+    const ctxBox = () => documentStub.querySelector("#ctxmenu");
+    // 读当前菜单：文本 = 各 span 拼接（含 ☑ 与加速键），disabled = 置灰标记
+    const readMenu = (box) => byClass(box, "mi").map(n => ({
+      node: n,
+      text: (n.children || []).map(c => c.textContent || "").join(""),
+      disabled: SN.menu.hasClass(n, "disabled"),
+      title: n.title || ""
+    }));
+    const pick = (list, key) => list.filter(x => x.text.indexOf(key) >= 0)[0];
+    const fireCtx = (host, target) => {
+      const ev = {
+        clientX: 12, clientY: 24, target, defaultPrevented: false, stopped: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() { this.stopped = true; }
+      };
+      (host.handlers.contextmenu || []).forEach(f => f(ev));
+      return ev;
+    };
+    const fireDoc = (type, target) => {
+      const ev = { target, key: "", preventDefault() { }, stopPropagation() { } };
+      (documentStub.handlers[type] || []).forEach(f => f(ev));
+      return ev;
+    };
+
+    // ① 宿主委托：每个宿主只挂 1 个 contextmenu（不逐项挂监听）
+    const editorZone = documentStub.querySelector("#editorZone");
+    for (const sel of ["#editorZone", "#tabstrip", "#fileList", "#resultView", "#statusbar"]) {
+      const n = (documentStub.querySelector(sel).handlers.contextmenu || []).length;
+      assert(n === 1, sel + " 应只挂 1 个委托 contextmenu，实际 " + n);
+    }
+    SN.menu.bindHosts();   // 幂等：重复调用不得重复挂监听
+    assert((editorZone.handlers.contextmenu || []).length === 1, "bindHosts 幂等，重复调用不重复挂监听");
+    const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    assert(indexHtml.indexOf("js/menu.js") >= 0 && indexHtml.indexOf("js/menu.js") < indexHtml.indexOf("js/app.js"),
+      "index.html 里 js/menu.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
+    assert(/id="ctxmenu"[^>]*role="menu"/.test(indexHtml), "#ctxmenu 声明 role=menu（右键菜单容器语义）");
+
+    // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染
+    const d0 = SN.app.docs.filter(d => d.editor)[0];
+    assert(d0, "存在可编辑文本文档");
+    SN.app.activeId = d0.id;
+    d0.editor.setText("hello world\nfoo bar\nend", [0, 0]);
+    let rendered = 0;
+    const savedRender = d0.editor.render, savedSchedule = d0.editor.scheduleRender;
+    d0.editor.render = () => { rendered++; };
+    d0.editor.scheduleRender = () => { rendered++; };
+    const evText = fireCtx(editorZone, d0.editor.ta);
+    assert(evText.defaultPrevented && evText.stopped, "文本区右键接管原生菜单（preventDefault + stopPropagation）");
+    assert(!ctxBox().classList.contains("hidden"), "右键后菜单可见");
+    const textMenu = readMenu(ctxBox());
+    for (const want of ["撤销", "复制", "清除全部标记", "标记颜色", "大小写转换", "行编辑", "空白字符操作", "书签", "查找…", "跳转行…", "列块编辑…"]) {
+      assert(pick(textMenu, want), "文本右键菜单含「" + want + "」");
+    }
+    assert(!pick(textMenu, "全部标记(Mark All)"), "右键菜单不再给「全部标记」（整体性入口留在顶栏/查找面板）");
+    assert(textMenu.every(x => x.text.indexOf("粘贴") < 0), "右键菜单不含「粘贴」：脚本不读剪贴板，粘贴请用 Ctrl+V");
+    const textMenuItems = textMenu.filter(x => !SN.menu.hasClass(x.node, "sep"));
+    assert(textMenuItems.length > 0 && textMenuItems.every(x => x.node.role === "menuitem"),
+      "右键菜单项带 menuitem 语义（容器声明 role=menu 的配套）");
+    assert(pick(textMenu, "复制").disabled, "无选区时「复制」置灰");
+    assert(rendered === 0, "打开右键菜单不触发编辑器渲染，实际 render 次数=" + rendered);
+    d0.editor.render = savedRender;
+    d0.editor.scheduleRender = savedSchedule;
+
+    // ③ 子菜单：hover/点击展开、调色板勾选、stay+rebuild、逐级关闭
+    const colorRow = pick(textMenu, "标记颜色");
+    colorRow.node.handlers.click[0]({ stopPropagation() { } });
+    let pop = byClass(documentStub.body, "menu-pop")[0];
+    assert(pop, "「标记颜色」点击后展开子菜单（.menu-pop）");
+    const colorItems = readMenu(pop);
+    assert(colorItems.length === SN.app.MARK_COLORS.length, "调色板子菜单项数 = 可用标记颜色数");
+    pick(colorItems, "颜色 2").node.handlers.click[0]({ stopPropagation() { } });
+    assert(SN.app.curMarkColor === SN.app.MARK_COLORS[1], "点选颜色后当前标记色切换");
+    pop = byClass(documentStub.body, "menu-pop")[0];
+    assert(pick(readMenu(pop), "颜色 2").text.indexOf("☑") === 0, "stay+rebuild：子菜单重绘并勾选新颜色");
+    assert(!ctxBox().classList.contains("hidden"), "stay 项不关闭菜单");
+
+    // ③b 选区记忆：右键菜单抢焦点/浏览器折叠光标后，「标记颜色」仍要作用于用户刚才选的那段文本
+    //     （修复前：hasSelection() 已是 false → kw 为空 → 既不标记也不提示，观感就是「点了没反应」）
+    {
+      const ed = d0.editor;
+      SN.menu.closeCtx();
+      SN.cmd.clearMarksAll();        // 前面段落已在这份编辑器上标过 alpha/beta，先清空让断言确定
+      ed.setText("alpha beta alpha\n", [0, 5]);
+      ed.rememberSelection();        // 真实浏览器里由 select/mouseup 触发（桩不派发真实事件）
+      ed.ta.setSelectionRange(5, 5);  // 模拟「右键/抢焦点把光标折叠掉」
+      assert(ed.hasSelection() === false, "前提：当前选区已被折叠");
+      assert(ed.effectiveSelectedText() === "alpha", "折叠后仍能取回最近一次有效选区文本");
+      fireCtx(editorZone, ed.ta);
+      const menuSel = readMenu(ctxBox());
+      assert(!pick(menuSel, "复制").disabled, "光标被折叠后「复制」仍可用（以记忆的选区为准）");
+      pick(menuSel, "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      const palSel = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+      pick(palSel, "颜色 3").node.handlers.click[0]({ stopPropagation() { } });
+      assert(ed.markRecords.length === 1 && ed.markRecords[0].keyword === "alpha",
+        "右键「标记颜色」把用户刚才选中的词标记了出来，实际=" + JSON.stringify(ed.markRecords.map(r => r.keyword)));
+      assert(ed.markRecords[0].color === SN.app.MARK_COLORS[2], "标记用的是刚点的那个颜色");
+      assert(ed.ta.selectionStart === 0 && ed.ta.selectionEnd === 5,
+        "点颜色时把「打开菜单那一刻」的选区还原回编辑器，实际=" + ed.ta.selectionStart + "," + ed.ta.selectionEnd);
+
+      // 更危险的退化：选区被折叠后走「大小写转换」，绝不能把整篇都改掉
+      SN.menu.closeCtx();
+      ed.clearLastSelection();
+      ed.setText("alpha beta\n", [0, 5]);
+      ed.rememberSelection();          // 用户选了 "alpha"
+      ed.ta.setSelectionRange(5, 5);   // 右键把它折叠
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "大小写转换").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "UPPERCASE").node.handlers.click[0]({ stopPropagation() { } });
+      assert(ed.text === "ALPHA beta\n",
+        "折叠光标后「大小写转换」仍只作用于菜单打开时的选区（而不是整篇），实际=" + JSON.stringify(ed.text));
+
+      // 真的没有选中内容时必须给出提示，不能再静默
+      SN.menu.closeCtx();
+      ed.clearLastSelection();
+      ed.ta.setSelectionRange(0, 0);
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "颜色 5").node.handlers.click[0]({ stopPropagation() { } });
+      assert(String(documentStub.querySelector("#msgLabel").textContent).indexOf("请先选中") >= 0,
+        "没有选中内容时明确提示而不是静默，实际=" + documentStub.querySelector("#msgLabel").textContent);
+      SN.menu.closeCtx();
+      ed.setText("hello world\nfoo bar\nend", [0, 0]);   // 还原给后续断言
+      // 后续 Esc 段落的前提是「菜单开着、且子菜单也开着」，这里把状态摆回去
+      fireCtx(editorZone, ed.ta);
+      pick(readMenu(ctxBox()), "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+    }
+
+    const keyHandlers = documentStub.handlers.keydown || [];
+    const esc = () => ({ key: "Escape", target: ctxBox(), preventDefault() { }, stopPropagation() { } });
+    keyHandlers.forEach(f => f(esc()));
+    assert(!byClass(documentStub.body, "menu-pop").length, "Esc 先关闭子菜单");
+    assert(!ctxBox().classList.contains("hidden"), "Esc 第一下只关子菜单");
+    keyHandlers.forEach(f => f(esc()));
+    assert(ctxBox().classList.contains("hidden"), "Esc 第二下关闭右键菜单");
+    assert(d0.editor.ta._focused === true, "Esc 关闭后焦点回到编辑器");
+
+    // hover 展开/收起子菜单（Win32 习惯）：根菜单 hover 子项开、hover 普通项关，子菜单内部不挂 hover
+    fireCtx(editorZone, d0.editor.ta);
+    pick(readMenu(ctxBox()), "大小写转换").node.handlers.mouseenter[0]();
+    const hoveredPop = byClass(documentStub.body, "menu-pop")[0];
+    assert(hoveredPop, "hover 子菜单项即展开子菜单");
+    assert(!(hoveredPop.children[0].handlers.mouseenter), "子菜单内部不挂 hover（否则鼠标移入会自关）");
+    pick(readMenu(ctxBox()), "撤销").node.handlers.mouseenter[0]();
+    assert(!byClass(documentStub.body, "menu-pop").length, "hover 普通项收起子菜单");
+    SN.menu.closeCtx();
+
+    // ④ 关闭路径：点击别处 / 滚动（document 级监听，各 1 个）
+    assert((documentStub.handlers.mousedown || []).length === 1, "document 只挂 1 个 mousedown（关闭右键菜单）");
+    assert((documentStub.handlers.scroll || []).length === 1, "document 只挂 1 个 scroll（关闭右键菜单）");
+    fireCtx(editorZone, d0.editor.ta);
+    fireDoc("mousedown", documentStub.createElement("div"));
+    assert(ctxBox().classList.contains("hidden"), "点击菜单外关闭右键菜单");
+    fireCtx(editorZone, d0.editor.ta);
+    fireDoc("scroll", d0.editor.ta);
+    assert(ctxBox().classList.contains("hidden"), "编辑器滚动关闭右键菜单");
+
+    // ⑤ 大文本 / Hex 视图菜单按能力表收敛
+    const bigDoc = { id: "ctxBig", name: "big.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new TextEncoder().encode("a\nb\n") };
+    SN.menu.openCtx(10, 20, SN.views.of(bigDoc).contextMenu(bigDoc), { doc: bigDoc });
+    const bigMenu = readMenu(ctxBox());
+    for (const want of ["清除全部标记", "标记颜色", "查找…", "跳转行…", "复制选中内容", "导出原始文件", "重命名…"]) {
+      assert(pick(bigMenu, want), "大文本右键菜单含「" + want + "」");
+    }
+    assert(!pick(bigMenu, "全部标记(Mark All)"), "大文本右键菜单不含「全部标记」（点颜色已经标记当前目标）");
+    assert(!pick(bigMenu, "撤销") && !pick(bigMenu, "另存为"), "大文本右键菜单不给编辑/保存入口");
+    assert(pick(bigMenu, "复制选中内容").disabled, "大文本视图无选中时「复制选中内容」置灰");
+    const hexDoc = { id: "ctxHex", name: "x.bin", kind: "hex", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new Uint8Array([0, 1, 2, 3]) };
+    SN.menu.openCtx(10, 20, SN.views.of(hexDoc).contextMenu(hexDoc), { doc: hexDoc });
+    const hexMenu = readMenu(ctxBox());
+    for (const want of ["导出原始文件", "以文本模式重载", "重命名…"]) {
+      assert(pick(hexMenu, want), "Hex 右键菜单含「" + want + "」");
+    }
+    assert(!pick(hexMenu, "查找…") && !pick(hexMenu, "撤销"), "Hex 右键菜单不给查找/编辑入口");
+    assert(SN.caps.can("rename", hexDoc), "Hex 视图能力表含重命名（右键菜单据此提供入口）");
+
+    // ⑥ O(1)：菜单节点数与文档长度无关（3MB 与 3 行完全一致）
+    const edBig = new SN.Editor({ readOnly: false, wrap: false, langId: "txt", zoom: 100 });
+    edBig.setText("x".repeat(3 * 1024 * 1024) + "\n", [0, 0]);
+    const bigTextDoc = { id: "ctx3mb", name: "m3.txt", kind: "text", enc: "utf8", eol: "lf", lang: "txt", content: "", editor: edBig };
+    SN.menu.openCtx(10, 20, SN.views.of(d0).contextMenu(d0, {}), { doc: d0 });
+    const nSmall = byClass(ctxBox(), "mi").length;
+    SN.menu.openCtx(10, 20, SN.views.of(bigTextDoc).contextMenu(bigTextDoc, {}), { doc: bigTextDoc });
+    const nBig = byClass(ctxBox(), "mi").length;
+    assert(nSmall === nBig && nSmall > 10, "菜单节点数与文档长度无关（O(1)），实际 " + nSmall + " vs " + nBig);
+
+    // ⑦ 反复开合不累积监听器（旧实现每次打开都挂一个 document {once:true} 监听）
+    const clickBefore = (documentStub.handlers.click || []).length;
+    const keyBefore = (documentStub.handlers.keydown || []).length;
+    for (let i = 0; i < 3; i++) { SN.menu.closeCtx(); fireCtx(editorZone, d0.editor.ta); }
+    SN.menu.closeCtx();
+    assert((documentStub.handlers.click || []).length === clickBefore, "反复开合不累积 click 监听");
+    assert((documentStub.handlers.keydown || []).length === keyBefore, "反复开合不累积 keydown 监听");
+
+    // ⑧ 文件列表项：与标签栏共用文档菜单；只读视图的「另存为」按能力置灰
+    SN.app.docs.push(hexDoc);
+    const fileList = documentStub.querySelector("#fileList");
+    const li = documentStub.createElement("li");
+    li.dataset.id = d0.id;
+    assert(fireCtx(fileList, li).defaultPrevented, "文件列表项右键接管原生菜单");
+    for (const want of ["关闭当前文档", "重命名…", "以文本模式重载", "以二进制(Hex)重载"]) {
+      assert(pick(readMenu(ctxBox()), want), "文件列表右键菜单含「" + want + "」");
+    }
+    li.dataset.id = hexDoc.id;
+    fireCtx(fileList, li);
+    const hexDocMenu = readMenu(ctxBox());
+    assert(pick(hexDocMenu, "另存为…").disabled, "只读视图下文件列表「另存为」置灰");
+    assert(pick(hexDocMenu, "另存为…").title.indexOf("Hex 只读视图不支持保存") === 0,
+      "置灰项说明原因，实际=" + pick(hexDocMenu, "另存为…").title);
+    assert(!pick(hexDocMenu, "以文本模式重载").disabled, "Hex 视图可在右键菜单里切回文本");
+
+    // ⑨ 结果行/分组头：跳转与左键同源、复制入口齐备（回归此前未覆盖的右键面）
+    const resultView = documentStub.querySelector("#resultView");
+    const row = documentStub.createElement("div");
+    row.className = "res-row";
+    row.dataset.doc = d0.id; row.dataset.start = 0; row.dataset.end = 5; row.dataset.line = 1;
+    const lnn = documentStub.createElement("span"); lnn.className = "lnn"; lnn.textContent = "行 1:";
+    const content = documentStub.createElement("span"); content.textContent = "hello";
+    row.appendChild(lnn); row.appendChild(content);
+    assert(fireCtx(resultView, row).defaultPrevented, "结果行右键接管原生菜单");
+    const rowMenu = readMenu(ctxBox());
+    for (const want of ["跳转到该行", "复制该行文本", "复制行号+文本", "复制全部结果"]) {
+      assert(pick(rowMenu, want), "结果行右键菜单含「" + want + "」");
+    }
+    SN.app.activeId = "none";
+    pick(rowMenu, "跳转到该行").node._activate();
+    assert(SN.app.activeId === d0.id, "「跳转到该行」切到命中文档（与左键点击同源）");
+
+    // ⑩ 状态栏四变体：编码格 / 语言格 / 行尾格 / 其它
+    const statusbar = documentStub.querySelector("#statusbar");
+    const cellWith = (id) => { const n = documentStub.createElement("span"); n.id = id; return n; };
+    assert(fireCtx(statusbar, cellWith("codeLabel")).defaultPrevented, "状态栏右键接管原生菜单");
+    const codeMenu = readMenu(ctxBox());
+    assert(pick(codeMenu, "以编码重新加载") && pick(codeMenu, "转换为编码"), "编码格右键给编码菜单");
+    fireCtx(statusbar, cellWith("langLabel"));
+    assert(pick(readMenu(ctxBox()), "用户自定义语言…"), "语言格右键给语言菜单");
+    fireCtx(statusbar, cellWith("eolSel"));
+    assert(pick(readMenu(ctxBox()), "转为 Unix(LF)"), "行尾格右键给换行符转换菜单");
+    fireCtx(statusbar, cellWith("msgLabel"));
+    const barMenu = readMenu(ctxBox());
+    for (const want of ["工具栏", "文件列表窗口", "查找结果面板", "放大", "缩小", "重置为 100%"]) {
+      assert(pick(barMenu, want), "状态栏通用右键菜单含「" + want + "」");
+    }
+    SN.menu.closeCtx();
+    assert(ctxBox().classList.contains("hidden"), "关闭后 #ctxmenu 归位隐藏");
+
+    // ⑪ 剪贴板工具：优先 clipboard.writeText，缺失/失败时退回 execCommand，全程不抛异常
+    {
+      assert(await SN.menu.copyText("hello") === true, "有 clipboard.writeText 时复制成功");
+      const savedClip = sandbox.navigator.clipboard;
+      sandbox.navigator.clipboard = undefined;
+      assert(await SN.menu.copyText("hello") === false, "无 clipboard 且无 execCommand 时安全失败");
+      sandbox.navigator.clipboard = savedClip;
+    }
+
+    // ⑫ 大文件视图：右键「标记颜色」必须以「打开菜单那一刻的选区」为准
+    //     （修复前：折叠 selectionchange 会把 bigSel 清空 → 永远提示「请先选中要高亮的文本」）
+    {
+      // 造一个走完整 buildPage 流程的大文件文档（pageEl/适配器都齐全）
+      const big = {
+        id: "ctxBigReal", name: "real.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("alpha needle\nbeta line\nneedle two\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      assert(big.pageEl && typeof big.bigSetSelected === "function" && typeof big._bigKeywordAt === "function",
+        "大文件视图注册了「固定右键目标」与「右键落点取词」");
+      const savedGet = sandbox.window.getSelection;
+      big.bigSetSelected("");
+      // 大文件视图的「页」是 .page 里的 .bigview（selectionchange 以它为界判断是否属于本视图）
+      const bigView = big.pageEl.children[0];
+      // 拖选 → 记录
+      sandbox.window.getSelection = () => ({ anchorNode: bigView, isCollapsed: false, toString: () => "needle" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(big.bigSelected() === "needle", "大文件里拖选后记下目标词，实际=" + JSON.stringify(big.bigSelected()));
+      // 右键/菜单抢焦点 → 浏览器报「折叠」，不得因此清空记忆（这条就是本次 bug）
+      sandbox.window.getSelection = () => ({ anchorNode: bigView, isCollapsed: true, toString: () => "" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(big.bigSelected() === "needle", "折叠不再清掉大文件的选区记忆");
+      sandbox.window.getSelection = savedGet;
+
+      big.bigMarks = [];
+      SN.app.activeId = big.id;
+      fireCtx(editorZone, bigView);
+      const bigMenuReal = readMenu(ctxBox());
+      assert(!pick(bigMenuReal, "复制选中内容").disabled, "有目标时大文件菜单「复制选中内容」可用");
+      assert(!pick(bigMenuReal, "标记颜色").disabled, "大文件菜单「标记颜色」可用（requires=mark）");
+      pick(bigMenuReal, "标记颜色").node.handlers.click[0]({ stopPropagation() { } });
+      pick(readMenu(byClass(documentStub.body, "menu-pop")[0]), "颜色 4").node.handlers.click[0]({ stopPropagation() { } });
+      assert(big.bigMarks.length === 1 && big.bigMarks[0].keyword === "needle",
+        "大文件右键「标记颜色」把目标词标记出来，实际=" + JSON.stringify(big.bigMarks));
+      assert(big.bigMarks[0].color === SN.app.MARK_COLORS[3], "标记用的是刚点的那个颜色");
+      SN.menu.closeCtx();
+      SN.app.docs = SN.app.docs.filter(d => d.id !== big.id);
+    }
+
+    // ⑬ 菜单外观护栏（css/sn.css）：分隔线不得被渲染成「像可选中项」的粗条/高亮条
+    {
+      const css = fs.readFileSync(path.join(__dirname, "css/sn.css"), "utf8");
+      assert(/\.mi:not\(\.sep\):not\(\.disabled\):hover\{/.test(css), "菜单 hover 高亮只给可点击条目");
+      assert(!/(^|\n)\.mi:hover\{/m.test(css), "不再有「所有 .mi 都高亮」的旧规则");
+      assert(/\.mi\.sep\{[^}]*cursor:default/.test(css), "分隔线用默认光标（不再是手型）");
+      assert(/\.mi\.sep\{[^}]*pointer-events:none/.test(css), "分隔线不参与 hover（划过时上一项保持高亮）");
+      assert(/#ctxmenu \.mi\.sep\{padding:0\}/.test(css), "右键菜单里分隔线不带条目内边距（否则会变成粗条）");
+    }
+
+    // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言
+    SN.app.docs = SN.app.docs.filter(d => d.id !== hexDoc.id);
+    SN.app.activeId = "bigA";
+    SN.refreshMenus();
   }
 
     // ---- 静态图标资源一致性 ----

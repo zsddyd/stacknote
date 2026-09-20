@@ -54,6 +54,7 @@
       this._gKey = null;        // 行号窗口 key（防重复渲染）
       this._caretPos = -1;      // 光标行缓存（避免滚动时全量扫描）
       this._caretLine = 0;
+      this._lastSel = null;     // 最近一次有效选区 {start,end}：右键菜单/失焦后仍能拿到「刚才选了什么」
       this._marksText = null;   // 已计算标记区间时的文本快照（文本未变则不重复扫描）
       this._build();
       this._lineH = null;
@@ -92,6 +93,7 @@
       const ta = this.ta;
       ta.addEventListener("beforeinput", (e) => {
         if (this.readOnly) return;
+        this._lastSel = null;   // 用户开始改文本：记忆的选区偏移即将失效
         if (this._batch === null) this._batch = this._snap();
         clearTimeout(this._batchTimer);
         this._batchTimer = setTimeout(() => { this._finalize(); }, 800);
@@ -105,8 +107,20 @@
       });
       ta.addEventListener("scroll", () => { this._syncScroll(); }, { passive: true });
       ta.addEventListener("click", () => { this._reportStatus(); });
-      ta.addEventListener("keyup", () => this._reportStatus());
-      ta.addEventListener("mouseup", () => this._reportStatus());
+      // 选区记忆：右键菜单会抢焦点、部分浏览器右键还会把光标折叠，
+      // 若只读「当前选区」，菜单里的复制/标记颜色会拿到空选区而静默失效。
+      ta.addEventListener("select", () => this.rememberSelection());
+      ta.addEventListener("keyup", (e) => {
+        // 不带 Shift 的方向/翻页键是「有意挪光标」，此时清掉记忆，避免下次右键误用旧选区
+        if (e && !e.shiftKey && /^(Arrow|Home|End|Page)/.test(e.key || "")) this.clearLastSelection();
+        else this.rememberSelection();
+        this._reportStatus();
+      });
+      ta.addEventListener("mouseup", (e) => {
+        // 只处理左键：右键 mouseup 发生在 contextmenu 之前，不该改写记忆
+        if (!e || e.button === undefined || e.button === 0) this.rememberSelection();
+        this._reportStatus();
+      });
       ta.addEventListener("focus", () => { if (this.onActive) this.onActive(this); this._reportStatus(); });
       ta.addEventListener("dblclick", () => {
         const w = this.wordAtSelection();
@@ -236,6 +250,25 @@
     hasSelection() { return this.selStart !== this.selEnd; }
     caret() { return this.selStart; }
 
+    // ---------- 选区记忆（右键菜单抢焦点/浏览器折叠光标后，仍能拿到「用户刚才选了什么」） ----------
+    rememberSelection() {
+      const s = this.ta.selectionStart, e = this.ta.selectionEnd;
+      this._lastSel = s === e ? null : { start: s, end: e };
+    }
+    clearLastSelection() { this._lastSel = null; }
+    // 当前选区优先；被折叠（右键/失焦）时回退到最近一次有效选区
+    effectiveSelection() {
+      const s = this.ta.selectionStart, e = this.ta.selectionEnd;
+      if (s !== e) return { start: s, end: e };
+      const l = this._lastSel;
+      if (l && l.start < l.end && l.end <= this.ta.value.length) return { start: l.start, end: l.end };
+      return null;
+    }
+    effectiveSelectedText() {
+      const r = this.effectiveSelection();
+      return r ? this.ta.value.slice(r.start, r.end) : "";
+    }
+
     setText(t, sel) {
       this._setTextWithSel(t, sel ? sel[0] : this.ta.selectionStart, sel ? sel[1] : this.ta.selectionEnd);
       this._afterEdit(true);
@@ -255,6 +288,8 @@
       this.ta.value = v;
       this._lc = null;
       this._oldText = v;
+      // 文本变了，旧的选区偏移不再对应同一段内容：清掉记忆，别让右键菜单用过期区间
+      this._lastSel = null;
       try { this.ta.setSelectionRange(s, Math.min(e, v.length)); } catch (err) { /* ignore */ }
     }
 

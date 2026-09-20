@@ -47,7 +47,8 @@
     },
     hex: {
       label: "Hex 只读",
-      caps: ["exportBytes", "reloadAsText"]
+      // 重命名只改文档名、不需要正文，Hex 视图同样可用（右键菜单据此给出「重命名…」）
+      caps: ["exportBytes", "reloadAsText", "rename"]
     }
   };
 
@@ -91,7 +92,9 @@
     tabTag: "", listTag: "", modeTag: "", persistBody: true,
     open: DEFAULT_OPEN,
     render: null, jumpToLine: null, search: null,
-    selectionKeyword: null, markSelection: null, clearMarks: null, exportBytes: null
+    selectionKeyword: null, markSelection: null, clearMarks: null, exportBytes: null,
+    // 各视图自己的右键菜单（由拥有该视图实现的模块注册；缺省表示该视图不接管右键）
+    contextMenu: null
   };
   function define(kind, part) {
     const merged = Object.assign({}, EMPTY, ADAPTERS[kind], part);
