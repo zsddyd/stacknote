@@ -136,9 +136,9 @@
     const menus = [
       { label: "文件", items: [
         { label: "新建", sc: "file.new" },
-        { label: "打开…", sc: "file.open" },
-        { label: "以文本模式打开…", action: () => cmd.open("text") },
-        { label: "以二进制(Hex)打开…", action: () => cmd.open("hex") },
+        // 视图由内容自动识别（见 decideKind）：大文本 → 只读虚拟滚动、二进制 → Hex 只读、其余 → 文本编辑。
+        // 需要强制某个视图时，打开后在标签/文件列表上右键「重新打开为 …」，入口只留这一个。
+        { label: "打开…", sc: "file.open", tip: "自动识别视图：按大小、编码与 NUL 字节判定 文本编辑 / 大文本只读 / 二进制(Hex) 只读" },
         "-",
         { label: "保存", sc: "file.save", requires: "save" },
         { label: "全部保存", requires: "save", action: () => cmd.saveAll() },
@@ -392,12 +392,15 @@
     tab.dataset.id = doc.id;
     const title = el("span", { class: "ttitle", text: doc.name });
     const dirty = el("span", { class: "dirty" + (doc.dirty ? "" : " hidden"), text: "*" });
-    // 标签上的模式标记由视图适配器提供（Hex ⛭ / 大文本 ≫ / 只读文本 🔒）
+    // 标签上的模式标记由视图适配器提供（Hex ⛭ / 大文本 ≫ / 只读文本 🔒）；
+    // 带上 class 是为了「重新打开为 …」换了视图后能就地刷新（见 updateTabTags）
     const mode = SN.views.of(doc).tabTag || (doc.readOnly ? "🔒" : "");
     const x = el("span", { class: "tx", title: "关闭", text: "×" });
     tab.appendChild(dirty);
     tab.appendChild(title);
-    if (mode) tab.appendChild(el("span", { text: mode }));
+    // 标记 span 始终创建（空时隐藏）：否则「重新打开为 …」切到只读视图时没有可更新的节点，
+    // 标签会一直不带视图标记（updateTabTags 只能改已有节点）
+    tab.appendChild(el("span", { class: "tmod" + (mode ? "" : " hidden"), text: mode }));
     tab.appendChild(x);
     tab.addEventListener("click", (e) => {
       if (e.target === x) { e.stopPropagation(); cmd.closeTab(doc.id); return; }
@@ -421,6 +424,19 @@
       if (star) star.classList.toggle("hidden", !d.dirty);
     });
   }
+  // 视图变了（重新打开为 …）之后刷新标签上的模式标记，别让标签继续显示旧视图
+  function updateTabTags() {
+    // 直接遍历 tabstrip 的子节点（等价于 "#tabstrip .tab"，且不依赖 querySelectorAll 的桩实现）
+    for (const n of (tabstrip.children || [])) {
+      if (!SN.menu.hasClass(n, "tab")) continue;
+      const d = docById(n.dataset.id);
+      if (!d) continue;
+      const tag = SN.views.of(d).tabTag || (d.readOnly ? "🔒" : "");
+      // 用 menu.js 的遍历工具找标记 span（真实 DOM 与 smoke 的 DOM 桩都可用）
+      const sp = SN.menu.firstDescendant(n, x => SN.menu.hasClass(x, "tmod"));
+      if (sp) { sp.textContent = tag; sp.classList.toggle("hidden", !tag); }
+    }
+  }
 
   // 文档级右键菜单（标签栏与文件列表共用同一份，避免两处各写一套）
   // 注意 reloadAs 的实现是 cmd.reloadAs（app2.js），此前这里写成裸标识符会抛 ReferenceError
@@ -433,8 +449,13 @@
       { label: "另存为…", requires: "save", action: () => cmd.saveAs(doc.id) },
       { label: "重命名…", action: () => cmd.renameDoc(doc.id) },
       "-",
-      { label: "以文本模式重载", requires: "reloadAsText", action: () => cmd.reloadAs(doc.id, "text") },
-      { label: "以二进制(Hex)重载", action: () => cmd.reloadAs(doc.id, "hex") },
+      // 打开时不再让用户选视图（统一入口 + 自动识别），改视图放到这里：三个视图互相切换，
+      // 需要时重读源字节（handle / File 引用 / 内存 raw），当前所在视图置灰
+      { label: "重新打开为（当前：" + SN.caps.label(doc) + "）", sub: [
+        { label: "文本编辑", requires: "reloadAsText", disabled: SN.caps.kindOf(doc) === "text", action: () => cmd.reloadAs(doc.id, "text") },
+        { label: "大文本只读", disabled: SN.caps.kindOf(doc) === "big", action: () => cmd.reloadAs(doc.id, "big") },
+        { label: "二进制(Hex)只读", disabled: SN.caps.kindOf(doc) === "hex", action: () => cmd.reloadAs(doc.id, "hex") }
+      ] },
       "-",
       { label: "打开所在目录(下载源文件)", action: () => cmd.downloadDoc(doc.id) }
     ];
@@ -623,6 +644,62 @@
     app.pendingOpenMode = "auto";
   }
 
+  // ---- 视图判定 / 解码：打开文件与「重新打开为 …」共用的唯一一处 ----
+  function bigLimitBytes() { return Math.max(2, app.settings.bigThresholdMB || 2) * 1024 * 1024; }
+  // 自动识别规则（mode 为 "auto" 时）：
+  //   >阈值 且 头部 4KB 无 NUL          → 大文本只读（虚拟滚动，不整篇解码）
+  //   头部 4KB 有 NUL 且编码非 UTF-16   → 二进制 Hex 只读
+  //   其余（小文件、UTF-16 大文件）      → 文本编辑
+  // mode 传 "text"/"big"/"hex" 时表示用户明确指定视图，跳过自动判定
+  function decideKind(bytes, size, mode) {
+    const det = SN.detectEncode(bytes);
+    const hasNul = bytes.slice(0, Math.min(bytes.length, 4096)).some(b => b === 0);
+    const isBig = size > bigLimitBytes();
+    let kind = "text";
+    if (mode === "text" || mode === "big" || mode === "hex") kind = mode;
+    else if (isBig && !hasNul) kind = "big";
+    else if (hasNul && det.id !== "utf16le" && det.id !== "utf16be") kind = "hex";
+    else if (isBig && (det.id === "utf16le" || det.id === "utf16be")) kind = "big";
+    return { kind, det, hasNul, isBig };
+  }
+  // 把字节写进一个文档对象（不动 id/name/dirty）：kind/enc/raw/content/eol 全部按视图适配器来
+  function applyBytesToDoc(d, bytes, mode, size) {
+    const size2 = size || bytes.length;
+    const r = decideKind(bytes, size2, mode);
+    const view = SN.views.byKind(r.kind);
+    d.kind = r.kind;
+    d.enc = view.open.fallbackEnc || r.det.id;
+    d.readOnly = !!view.open.readOnly;
+    d.size = size2;
+    // 原始字节保留策略与打开时一致：只读视图必须留；普通文本只在小文件时留（供按编码重载/导回）
+    d.raw = (view.open.keepRawBytes || size2 <= 2 * 1024 * 1024) ? bytes : null;
+    if (view.open.decodeMode === "none") {
+      d.content = "";
+    } else if (view.open.decodeMode === "head") {
+      // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
+      const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
+      d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
+      d.content = "";
+    } else {
+      const text = SN.decodeBytes(bytes, d.enc);
+      d.eol = SN.detectEol(text);
+      d.content = SN.normalizeEol(text, "lf");
+    }
+    return r;
+  }
+  // 取一个已打开文档的原始字节（供「重新打开为 …」）：
+  // FileSystemHandle（可再授权重读）→ 会话内保留的 File 引用（只是个句柄，不占内存）→ 内存里的 raw
+  async function sourceBytesOf(d) {
+    if (!d) return null;
+    if (d.handle && d.handle.getFile) {
+      try { return await SN.readAsBytes(await d.handle.getFile()); } catch (e) { /* 权限/文件已变，继续往下试 */ }
+    }
+    if (d.file) {
+      try { return await SN.readAsBytes(d.file); } catch (e) { /* 同上 */ }
+    }
+    return d.raw || null;
+  }
+
   async function importFile(file, mode, handle) {
     try {
       const bytes = await SN.readAsBytes(file);
@@ -630,49 +707,30 @@
       // 编码探测：大文件走采样（毫秒级），这里记录耗时与是否采样，便于真机诊断打开卡顿
       const clock = (typeof performance !== "undefined" && performance.now) ? () => performance.now() : () => Date.now();
       const tDetect = clock();
-      const det = SN.detectEncode(bytes);
-      const detectMs = Math.round(clock() - tDetect);
-      const hasNul = bytes.slice(0, Math.min(bytes.length, 4096)).some(b => b === 0);
-      const bigLimit = Math.max(2, app.settings.bigThresholdMB || 2) * 1024 * 1024;
-      const isBig = size > bigLimit;
-      let kind = "text";
-      if (mode === "hex") kind = "hex";
-      else if (mode === "text") kind = "text";               // 用户强制以文本编辑打开
-      else if (isBig && !hasNul) kind = "big";               // 自动：大文本 -> 虚拟只读
-      else if (hasNul && det.id !== "utf16le" && det.id !== "utf16be") kind = "hex";
-      else if (isBig && (det.id === "utf16le" || det.id === "utf16be")) kind = "big";
-      console.info("[open]", file.name, "size="+size, "limit="+bigLimit, "mode="+mode, "kind="+kind,
-        "hasNul="+hasNul, "enc="+det.id, "sampled="+!!det.sampled+"("+det.sampledBytes+"B)", "detect="+detectMs+"ms");
-      // 视图类型判定到此为止（打开流程里唯一一次判定）；之后该视图怎么存、怎么解码都取自适配器
-      const view = SN.views.byKind(kind);
-
       const d = {
         id: SN.uid(),
         name: file.name,
         path: file.name,
-        kind,
-        enc: view.open.fallbackEnc || det.id,
         eol: "lf",
         lang: SN.detectLangByName(file.name),
         dirty: false,
-        readOnly: !!view.open.readOnly,
+        kind: "text",
+        enc: "utf8",
+        readOnly: false,
+        // 保留源文件引用（句柄式引用，不复制字节）：打开后「重新打开为 …」可直接重读原始字节。
+        // 注意它不会被写进会话（storage.saveSession 只挑固定字段），所以不会把文件内容塞进 IndexedDB。
+        file,
         handle: handle || null,
         size,
-        // 仅保留必要原始字节：只读视图必须；普通文本只在小文件时保留（用于“按编码重载”）
-        raw: (view.open.keepRawBytes || size <= 2 * 1024 * 1024) ? bytes : null
+        raw: null,
+        content: ""
       };
-      if (view.open.decodeMode === "none") {
-        d.content = "";
-      } else if (view.open.decodeMode === "head") {
-        // 只解码头部一小段做行尾判定，避免整篇解码造成内存翻倍
-        const head = bytes.slice(0, Math.min(bytes.length, 512 * 1024));
-        d.eol = SN.detectEol(SN.decodeBytes(head, d.enc));
-        d.content = "";
-      } else {
-        let text = SN.decodeBytes(bytes, d.enc);
-        d.eol = SN.detectEol(text);
-        d.content = SN.normalizeEol(text, "lf");
-      }
+      // 视图判定 + 解码只在这里做一次（与「重新打开为 …」共用同一函数）
+      const r = applyBytesToDoc(d, bytes, mode, size);
+      const view = SN.views.byKind(d.kind);
+      const detectMs = Math.round(clock() - tDetect);
+      console.info("[open]", file.name, "size="+size, "limit="+bigLimitBytes(), "mode="+mode, "kind="+d.kind,
+        "hasNul="+r.hasNul, "enc="+r.det.id, "sampled="+!!r.det.sampled+"("+r.det.sampledBytes+"B)", "detect="+detectMs+"ms");
       addDoc(d);
       activateDoc(d.id);
       if (handle) pushRecent({ name: d.name, handle });
@@ -1000,7 +1058,7 @@
         { label: "跳转行…", sc: "edit.goto" }
       ];
     }
-    // 只读文本视图（以文本模式打开的大文件等）：只留「看」与「标记」，不给编辑入口
+    // 只读文本视图（打不开大文本虚拟视图时的兜底等）：只留「看」与「标记」，不给编辑入口
     if (doc.readOnly) {
       return withMenuSel(doc, effSel, [
         { label: "清除全部标记", requires: "mark", action: () => cmd.clearMarksAll() },
@@ -1281,4 +1339,17 @@
     if (!d.dirty) { d.dirty = true; updateTabNodes(); updateTitle(); }
     scheduleSaveSession();
   };
+  // 「重新打开为 …」用：正文被磁盘字节替换，脏标记必须清掉（否则标签一直挂 * 且关闭时误报未保存）
+  SN.docMarkClean = function (d) {
+    if (!d) return;
+    d.dirty = false;
+    updateTabNodes();
+    updateTitle();
+    scheduleSaveSession();
+  };
+  // 视图相关工具（app2.js 的 cmd.reloadAs 使用）：判定/解码与「取原始字节」都只有一处
+  SN.applyBytesToDoc = applyBytesToDoc;
+  SN.sourceBytesOf = sourceBytesOf;
+  SN.bigLimitBytes = bigLimitBytes;
+  SN.updateTabTags = updateTabTags;
 })();

@@ -256,31 +256,45 @@
     updateStatusLabel();
     setMsg("编码标记已切换为 " + SN.codeById(code).name + "（保存时生效）");
   };
-  cmd.reloadAs = function (docId, kind) {
+  // 重新打开为指定视图（三种视图互相切换）。打开入口统一成「打开…」+ 自动识别之后，
+  // 需要强制视图时都走这里：重新取源字节 → 复用 app.js 的 applyBytesToDoc 判定/解码 → 重建页面。
+  cmd.reloadAs = async function (docId, kind) {
     const d = SN.docById(docId);
     if (!d) return;
-    const target = kind;   // 目标视图类型（"text" / "hex"）
-    // 能否切回可编辑文本由能力表决定（大文本视图不支持，Hex 支持）：
-    // 大文件请用「文件 → 以文本模式打开…」重新打开，避免整篇解码卡顿
+    const target = kind;   // "text" / "big" / "hex"
+    if (target !== "text" && target !== "big" && target !== "hex") { setMsg("不支持的视图类型"); return; }
+    // 能否切回可编辑文本由能力表决定（见 js/viewcaps.js；三种视图现在都支持，留着是为了口径统一）
     if (target === "text" && !SN.caps.can("reloadAsText", d)) { setMsg(SN.caps.reason("reloadAsText", d)); return; }
-    if (target === "text") {
-      if (SN.caps.can("edit", d)) { setMsg("当前已是文本模式"); return; }
-      if (!d.raw) { setMsg("未保留原始字节，无法切回文本模式"); return; }
-      const text = SN.decodeBytes(d.raw, d.enc);
-      d.kind = "text";
-      d.content = SN.normalizeEol(text, "lf");
-      d.eol = SN.detectEol(text);
-      d.raw = null;
-      d.readOnly = false;
+    if (SN.caps.kindOf(d) === target) { setMsg("当前已经是" + SN.caps.label({ kind: target }) + "视图"); return; }
+    // 切到只读视图会用磁盘字节替换正文：有未保存修改时先确认，别让改动无声消失
+    if (d.dirty && target !== "text") {
+      if (!confirm("“" + d.name + "”有未保存的修改，切到" + SN.caps.label({ kind: target }) +
+        "视图会丢弃这些修改（原文件不变）。继续？")) { setMsg("已取消切换视图"); return; }
+    }
+    // 切回可编辑文本对大文件是重操作（整篇解码 + 可编辑 textarea）：二次确认
+    if (target === "text" && (d.size || 0) > SN.bigLimitBytes()) {
+      if (!confirm("“" + d.name + "”共 " + SN.fmtSize(d.size) + "，切回可编辑文本需要整篇解码，可能较慢。继续？")) {
+        setMsg("已取消切回文本模式"); return;
+      }
+    }
+    const bytes = await SN.sourceBytesOf(d);
+    if (!bytes) {
+      setMsg(d.newFile
+        ? "新文档还没有对应文件，无法「重新打开为」其他视图；先保存，或用「打开…」选择文件"
+        : "未保留原始字节，无法重新打开为" + SN.caps.label({ kind: target }) + "；请用「打开…」重新选择该文件");
+      return;
+    }
+    try {
+      SN.applyBytesToDoc(d, bytes, target, bytes.length || d.size || 0);
+      SN.docMarkClean(d);
       SN.rebuildDocPage(d);
-      setMsg("已切换为文本编辑模式（大文件编辑可能较慢）");
-    } else if (target === "hex") {
-      const bytes = d.raw;
-      if (!bytes) { setMsg("未保留原始字节，无法转 Hex 视图"); return; }
-      d.kind = "hex";
-      SN.rebuildDocPage(d);
-      setMsg("已切换为 Hex 只读视图");
-    } else setMsg("不支持的视图类型");
+      if (SN.updateTabTags) SN.updateTabTags();
+      if (SN.updateFileList) SN.updateFileList();
+      const view = SN.views.byKind(d.kind);
+      setMsg("已重新打开为" + SN.caps.label(d) + "（" + SN.fmtSize(d.size) + "，" + SN.codeById(d.enc).name + view.open.note + "）");
+    } catch (e) {
+      setMsg("重新打开失败：" + (e && e.message ? e.message : e));
+    }
   };
   // Hex 视图适配器：渲染、导出原始字节、切回可编辑文本都由 app2.js 实现
   SN.views.define("hex", {
@@ -1179,7 +1193,7 @@ SN.openModal({
         boxes.forEach(x => grid.appendChild(x));
         b.appendChild(grid);
         b.appendChild(el("div", { class: "formrow" }, [el("label", { text: "大文本虚拟只读阈值(MB)" }), numIn("optBig", s.bigThresholdMB, 2, 500)]));
-        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 2MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，用“以文本模式打开”强制可编辑（大文件会较慢）。" }));
+        b.appendChild(el("div", { class: "hint", text: "超过该阈值（默认 2MB）会自动用“大文本只读/虚拟滚动”打开：只渲染可视区域行，流畅浏览大日志且不 OOM。若确实需要编辑，打开后右键标签选「重新打开为 → 文本编辑」（会二次确认，大文件较慢）。" }));
         function sel(id, opts, val) { const s2 = el("select", { id }); opts.forEach(o => s2.appendChild(el("option", { value: o[0], text: o[1], selected: o[0] === val }))); return s2; }
         function numIn(id, val, min, max) { return el("input", { type: "number", id, value: val, min, max, style: "width:90px" }); }
         function chk(id, label, v) { return el("label", {}, [el("input", { type: "checkbox", id, checked: v }), " " + label]); }

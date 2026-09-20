@@ -42,8 +42,9 @@
     },
     big: {
       label: "大文本只读",
-      // 大文件走虚拟滚动只读视图：能看、能搜、能标记、能定位行、能导出原始字节
-      caps: ["find", "mark", "gotoLine", "exportBytes", "rename"]
+      // 大文件走虚拟滚动只读视图：能看、能搜、能标记、能定位行、能导出原始字节；
+      // 也能切回可编辑文本（右键「重新打开为 → 文本编辑」，会二次确认，见 app2 的 cmd.reloadAs）
+      caps: ["find", "mark", "gotoLine", "exportBytes", "rename", "reloadAsText"]
     },
     hex: {
       label: "Hex 只读",

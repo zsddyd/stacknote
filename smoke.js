@@ -999,16 +999,30 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     const li = documentStub.createElement("li");
     li.dataset.id = d0.id;
     assert(fireCtx(fileList, li).defaultPrevented, "文件列表项右键接管原生菜单");
-    for (const want of ["关闭当前文档", "重命名…", "以文本模式重载", "以二进制(Hex)重载"]) {
+    for (const want of ["关闭当前文档", "重命名…", "重新打开为（当前：文本编辑）"]) {
       assert(pick(readMenu(ctxBox()), want), "文件列表右键菜单含「" + want + "」");
     }
+    // 视图切换收进子菜单：三项齐全，且当前所在视图置灰
+    pick(readMenu(ctxBox()), "重新打开为").node.handlers.click[0]({ stopPropagation() { } });
+    const viewSub = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+    for (const want of ["文本编辑", "大文本只读", "二进制(Hex)只读"]) {
+      assert(pick(viewSub, want), "「重新打开为」子菜单含「" + want + "」");
+    }
+    assert(pick(viewSub, "文本编辑").disabled, "当前视图（文本编辑）在子菜单里置灰");
+    SN.menu.closeCtx();
     li.dataset.id = hexDoc.id;
     fireCtx(fileList, li);
     const hexDocMenu = readMenu(ctxBox());
     assert(pick(hexDocMenu, "另存为…").disabled, "只读视图下文件列表「另存为」置灰");
     assert(pick(hexDocMenu, "另存为…").title.indexOf("Hex 只读视图不支持保存") === 0,
       "置灰项说明原因，实际=" + pick(hexDocMenu, "另存为…").title);
-    assert(!pick(hexDocMenu, "以文本模式重载").disabled, "Hex 视图可在右键菜单里切回文本");
+    assert(pick(hexDocMenu, "重新打开为（当前：Hex 只读）"), "Hex 视图的「重新打开为」标题标出当前视图");
+    pick(hexDocMenu, "重新打开为").node.handlers.click[0]({ stopPropagation() { } });
+    const hexViewSub = readMenu(byClass(documentStub.body, "menu-pop")[0]);
+    assert(pick(hexViewSub, "二进制(Hex)只读").disabled, "Hex 视图下「二进制(Hex)只读」置灰（就是当前视图）");
+    assert(!pick(hexViewSub, "文本编辑").disabled && !pick(hexViewSub, "大文本只读").disabled,
+      "Hex 视图可切回文本编辑或大文本只读");
+    SN.menu.closeCtx();
 
     // ⑨ 结果行/分组头：跳转与左键同源、复制入口齐备（回归此前未覆盖的右键面）
     const resultView = documentStub.querySelector("#resultView");
@@ -1119,6 +1133,92 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(/\.bg-gutter\{[^}]*width:var\(--bg-ln-w\)/.test(css), "分割线层的宽度来自同一个 --bg-ln-w");
       const bigSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
       assert(bigSrc.indexOf("width:64px") < 0, "bigtext.js 不再硬编码行号列宽：内联 width 会盖掉 CSS 造成错位");
+    }
+
+    // ⑭ 打开入口统一 + 视图自动识别 + 「重新打开为 …」三向切换
+    {
+      const menubarNode = documentStub.querySelector("#menubar");
+      assert(byText(menubarNode, "打开…"), "文件菜单保留唯一的「打开…」入口");
+      assert(!byText(menubarNode, "以文本模式打开…") && !byText(menubarNode, "以二进制(Hex)打开…"),
+        "文件菜单不再单列强制视图入口（视图改由自动识别 + 打开后「重新打开为」）");
+
+      // 自动识别规则（js/app.js 的 decideKind，经 SN.applyBytesToDoc 暴露）
+      const mkDoc = (id) => ({ id, name: "t", path: "t", eol: "lf", lang: "txt", dirty: false, raw: null, content: "" });
+      const encBytes = (t) => new TextEncoder().encode(t);
+      const bigLen = SN.bigLimitBytes();
+      const small = encBytes("hello\nworld\n");
+      const dA = mkDoc("autoA");
+      SN.applyBytesToDoc(dA, small, "auto", small.length);
+      assert(dA.kind === "text" && dA.readOnly === false, "小文本 → 自动识别为文本编辑");
+      const dB = mkDoc("autoB");
+      // 用更贴近现实的二进制（PNG 头）：注意这条例不是「任何含 NUL 都算二进制」——
+      // 无 BOM 且 NUL 呈 UTF-16 奇偶规律的短样本会被编码探测猜成 utf16le/be，从而按文本打开
+      //（既有规则有意偏向 UTF-16，兜底就是右键「重新打开为 → 二进制(Hex)只读」）
+      const binBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+      SN.applyBytesToDoc(dB, binBytes, "auto", binBytes.length);
+      assert(dB.kind === "hex" && dB.readOnly === true, "含 NUL 的二进制 → 自动识别为 Hex 只读");
+      const dC = mkDoc("autoC");
+      const bigBytes = new Uint8Array(bigLen + 1);
+      bigBytes.fill(0x41);
+      SN.applyBytesToDoc(dC, bigBytes, "auto", bigBytes.length);
+      assert(dC.kind === "big" && dC.readOnly === true && dC.content === "",
+        "超阈值纯文本 → 自动识别为大文本只读，且不整篇解码（content 为空）");
+      const dD = mkDoc("autoD");
+      const u16 = SN.encodeText("hello world\n第二行\n", "utf16le");
+      SN.applyBytesToDoc(dD, u16, "auto", u16.length);
+      assert(dD.kind === "text", "UTF-16 虽然含 NUL，也不误判成二进制");
+      assert(SN.caps.can("reloadAsText", { kind: "big" }), "大文本只读也支持切回可编辑文本（能力表已放开）");
+
+      // 三向切换：字节来源走内存 raw（真实场景是 handle / File 引用 / raw 三选一）
+      const sw = {
+        id: "sw1", name: "sw.txt", path: "sw.txt", kind: "text", enc: "utf8", eol: "lf", lang: "txt",
+        dirty: false, readOnly: false, newFile: false,
+        raw: encBytes("alpha\nbeta\n"), content: "alpha\nbeta\n", size: 11
+      };
+      SN.addDoc(sw);
+      SN.activateDoc(sw.id);
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "hex" && sw.readOnly === true, "文本 → 二进制(Hex)：切换成功");
+      const swTab = byClass(documentStub.querySelector("#tabstrip"), "tab")
+        .filter(n => SN.menu.dataOf(n, "id") === sw.id)[0];
+      const swTag = SN.menu.firstDescendant(swTab, n => SN.menu.hasClass(n, "tmod"));
+      assert(swTag && swTag.textContent === "⛭", "切到 Hex 后标签上的视图标记就地更新为 ⛭");
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "text" && sw.content.indexOf("alpha") === 0, "二进制 → 文本：内容按源字节解码回来");
+      await SN.cmd.reloadAs(sw.id, "big");
+      assert(sw.kind === "big", "文本 → 大文本只读：切换成功");
+      assert(SN.menu.firstDescendant(swTab, n => SN.menu.hasClass(n, "tmod")).textContent === "≫",
+        "切到大文本只读后标签标记更新为 ≫");
+
+      // 大文件切回可编辑文本要二次确认（原来靠「文件 → 以文本模式打开…」让用户主动选，入口统一后搬到这里）
+      sw.size = bigLen + 1;
+      const savedConfirm = sandbox.confirm;
+      sandbox.confirm = () => false;
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "big", "大文件切回文本时取消确认 → 保持大文本只读");
+      sandbox.confirm = () => true;
+      await SN.cmd.reloadAs(sw.id, "text");
+      assert(sw.kind === "text" && sw.readOnly === false, "确认后切回可编辑文本");
+
+      // 有未保存修改时切到只读视图也要确认：取消不能丢改动
+      sw.dirty = true;
+      sw.content = "edited in memory\n";
+      sandbox.confirm = () => false;
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "text" && sw.dirty === true, "有未保存修改时切只读视图需确认，取消 → 保持文本与脏标记");
+      sandbox.confirm = () => true;
+      await SN.cmd.reloadAs(sw.id, "hex");
+      assert(sw.kind === "hex" && sw.dirty === false, "确认后切到 Hex，并清掉脏标记（正文已被源字节替换）");
+      sandbox.confirm = savedConfirm;
+
+      // 没有源字节可用时要说清楚，而不是静默失败
+      const ghost = { id: "sw2", name: "ghost.txt", path: "ghost.txt", kind: "text", enc: "utf8", eol: "lf",
+        lang: "txt", dirty: false, readOnly: false, raw: null, content: "", size: 10 };
+      SN.app.docs.push(ghost);
+      await SN.cmd.reloadAs(ghost.id, "hex");
+      assert(ghost.kind === "text" && String(documentStub.querySelector("#msgLabel").textContent).indexOf("未保留原始字节") >= 0,
+        "取不到源字节时给出明确提示");
+      SN.app.docs = SN.app.docs.filter(x => x.id !== ghost.id && x.id !== sw.id);
     }
 
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言
