@@ -56,6 +56,9 @@ function makeNode(tag) {
     get firstChild() { return this.children[0] || null; }
   };
   Object.defineProperty(node, "parent", { get() { return node._parent; }, set(v) { node._parent = v; } });
+  // 标准 DOM 属性名是 parentNode；桩早期只提供了 parent，导致用 parentNode 往上找祖先的代码
+  //（例如大文件视图的 insidePage / 行节点回溯）在桩里永远走不到底、相关断言失真
+  Object.defineProperty(node, "parentNode", { get() { return node._parent; }, set(v) { node._parent = v; } });
   // 与浏览器一致：把 textContent 设为 "" 会清空子节点。
   // 不少代码靠 `container.textContent = ""` 清空后重建列表（结果面板/停靠窗），
   // 桩若只记属性不清子节点，跨次渲染会累积出陈旧节点、断言随之失真。
@@ -665,7 +668,9 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(SN.caps.can("save", textDoc) && SN.caps.can("undo", textDoc) && SN.caps.can("view", textDoc), "文本视图能力齐全");
       assert(!SN.caps.can("save", bigDoc) && !SN.caps.can("edit", bigDoc) && !SN.caps.can("undo", bigDoc), "大文本视图不支持保存/编辑/撤销");
       assert(SN.caps.can("find", bigDoc) && SN.caps.can("mark", bigDoc) && SN.caps.can("gotoLine", bigDoc) && SN.caps.can("exportBytes", bigDoc), "大文本视图仍支持查找/标记/跳转行/导出");
-      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc) && !SN.caps.can("statusPos", bigDoc), "大文本视图不支持书签/视图开关/选中哈希/行列定位");
+      assert(!SN.caps.can("bookmark", bigDoc) && !SN.caps.can("view", bigDoc) && !SN.caps.can("hashSelection", bigDoc), "大文本视图不支持书签/视图开关/选中哈希");
+      // 行列定位（statusPos）已补进大文本视图：语义是「选中起点行/列」或「视口首行」，只涉及可视行
+      assert(SN.caps.can("statusPos", bigDoc) && !SN.caps.can("statusPos", hexDoc), "大文本支持行列定位，Hex 仍不支持");
       assert(SN.caps.can("exportBytes", hexDoc) && !SN.caps.can("find", hexDoc), "Hex 视图只支持导出原始字节");
       assert(SN.caps.reason("save", bigDoc) === "大文本只读视图不支持保存/另存为", "统一原因文案，实际=" + SN.caps.reason("save", bigDoc));
       assert(SN.caps.reason("save", textDoc) === "", "可用时原因为空");
@@ -683,8 +688,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const tbFind = tbBtns.filter(b => String(b.title || "").indexOf("查找") === 0)[0];
       assert(tbSave && tbSave.className.indexOf("disabled") >= 0, "大文件下工具栏「保存」置灰");
       assert(tbFind && tbFind.className.indexOf("disabled") < 0, "大文件下工具栏「查找」仍可用");
-      assert(documentStub.querySelector("#posLabel").textContent.indexOf("大文本只读视图不支持行列定位信息") === 0,
-        "状态栏不再显示陈旧行列，实际=" + documentStub.querySelector("#posLabel").textContent);
+      // 行列定位已补进大文本视图：切换文档后会写该视图自己的位置信息，而不是留上一个文档的旧值
+      const posBig = String(documentStub.querySelector("#posLabel").textContent);
+      assert(/^Ln:\d+（视口首行）/.test(posBig) || /^块:\d+\//.test(posBig),
+        "切到大文件后状态栏显示该视图自己的行列信息（不再是陈旧值），实际=" + posBig);
       assert(documentStub.querySelector("#eolSel").disabled === true, "行尾选择器在只读视图禁用");
 
       // 快捷键：能力不足时不执行、不静默，且仍 preventDefault（挡住浏览器默认行为）
@@ -1244,16 +1251,34 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         SN.setMsg("");
         run();
         const want = SN.caps.reason(cap, bigDoc0);
-        assert(msg() === want, label + " 应提示「" + want + "」，实际=" + JSON.stringify(msg()));
+        // want 必须非空：否则能力表已支持该能力，这条断言会变成"空对空"的假通过
+        assert(want && msg() === want, label + " 应提示「" + want + "」，实际=" + JSON.stringify(msg()));
       };
       expectReason("书签切换", "bookmark", () => SN.cmd.toggleBookmark());
       expectReason("书签跳转", "bookmark", () => SN.cmd.gotoBookmark(1));
       expectReason("清除书签", "bookmark", () => SN.cmd.clearBookmarks());
-      expectReason("行列统计", "statusPos", () => SN.cmd.edStatus());
       expectReason("缩放", "zoom", () => SN.cmd.zoom(10));
       expectReason("显示空白", "view", () => SN.cmd.toggleSpaces());
-      expectReason("全部标记(面板)", "mark", () => { SN.app.findOpt.keyword = "needle"; SN.cmd.markKeyword(); });
       expectReason("查找下一个", "findStep", () => { SN.app.findOpt.keyword = "needle"; SN.dlg.findNext(); });
+      // 面板"全部标记"：mark 能力在大文件视图是支持的，但该子动作只有编辑器实现 →
+      // invoke 的兜底也必须给出非空说明（reason() 此时是空串，不能直接写进状态栏）
+      SN.setMsg("");
+      SN.app.findOpt.keyword = "needle";
+      SN.cmd.markKeyword();
+      assert(msg() && msg().indexOf("未实现") >= 0,
+        "能力已声明但该子动作未实现时给出非空说明，实际=" + JSON.stringify(msg()));
+      // 大文件视图现在支持行列定位：命令不写提示，而是让视图写状态栏；Hex 仍不支持 → 必须给原因
+      SN.setMsg("PROBE");
+      SN.cmd.edStatus();
+      assert(msg() === "PROBE", "大文件行列统计不写提示（由视图直接写状态栏），实际=" + JSON.stringify(msg()));
+      const hexPos = { id: "hexPos", name: "x.bin", kind: "hex", enc: "utf8", eol: "lf", lang: "txt", content: "", raw: new Uint8Array([1, 2, 3]) };
+      SN.app.docs.push(hexPos);
+      SN.app.activeId = hexPos.id;
+      SN.setMsg("");
+      SN.cmd.edStatus();
+      assert(msg() === SN.caps.reason("statusPos", hexPos), "Hex 视图行列统计给能力表原因，实际=" + JSON.stringify(msg()));
+      SN.app.docs = SN.app.docs.filter(x => x.id !== hexPos.id);
+      SN.app.activeId = bigDoc0.id;
       // 工具栏按钮走的是同一条转发路径（撤销 / 剪切）
       const tbBtns = byClass(documentStub.querySelector("#toolbar"), "iconbt");
       const undoBt = tbBtns.filter(b => String(b.title || "").indexOf("撤销") === 0)[0];
@@ -1301,6 +1326,86 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(posText.indexOf("Ln:") === 0, "文本视图行列统计仍上报到状态栏，实际=" + JSON.stringify(posText));
       SN.app.activeId = "bigA";
       SN.refreshMenus();
+    }
+
+    // ⑯ 大文件视图的 statusPos（行列定位）：无选中=视口首行，有选中=选区起点行/列 + 已选统计
+    {
+      const big = {
+        id: "posBig", name: "pos.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("alpha needle\nbeta line\nneedle two\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 30));         // 等行索引 + 首屏行渲染
+      const pos = () => String(documentStub.querySelector("#posLabel").textContent);
+      assert(SN.caps.can("statusPos", big) && typeof SN.views.byKind("big").status === "function",
+        "大文本视图声明并实现了行列定位");
+      SN.cmd.edStatus();
+      // 注意：大文件视图按「行起始字节偏移」计行，文件末尾的换行符不额外算一个空行
+      //（"a\nb\nc\n" → 3 行）；文本视图 countLines 是 +1 口径（同一内容 4 行）——两者各自的模型自洽
+      assert(/^Ln:1（视口首行）\s+共 3 行$/.test(pos()), "无选中时显示视口首行与总行数，实际=" + JSON.stringify(pos()));
+
+      // 造一个"选中第 2 行第 6 列"的选区（桩里造不出真实 Range，用等价对象驱动同一条代码路径）
+      const bigView = big.pageEl.children[0];
+      // 桩没有布局：给视口一个等效高度，让虚拟滚动真的渲染出一屏可视行
+      const viewportNode = bigView.children[0];
+      viewportNode.clientHeight = 240;
+      big._bigJump(1);
+      await new Promise(r => setTimeout(r, 30));
+      const row2 = SN.menu.firstDescendant(bigView, n => n._i === 1);
+      assert(row2, "第 2 行已渲染（虚拟滚动的可视行）");
+      const codeSpan = row2.children[1];
+      const fakeText = { nodeType: 3, data: "beta line", parentNode: codeSpan };
+      const savedSel = sandbox.window.getSelection;
+      sandbox.window.getSelection = () => ({
+        isCollapsed: false, rangeCount: 1, anchorNode: fakeText,
+        getRangeAt: () => ({ startContainer: fakeText, startOffset: 5 }),
+        toString: () => "beta line"
+      });
+      SN.cmd.edStatus();
+      assert(pos() === "Ln:2  Col:6  已选 1 行 / 9 字符  共 3 行",
+        "有选中时给出起点行列与已选统计，实际=" + JSON.stringify(pos()));
+
+      // 从未有过有效选区时折叠 → 仍是"视口首行"语义（此时还没有任何快照）
+      sandbox.window.getSelection = () => ({ isCollapsed: true, rangeCount: 0, anchorNode: fakeText, toString: () => "" });
+      SN.cmd.edStatus();
+      assert(/^Ln:1（视口首行）/.test(pos()), "没有过选区时显示视口首行，实际=" + JSON.stringify(pos()));
+
+      // —— 真实事件链路：走 selectionchange 处理器（而不是直接调命令）——
+      const rebuildSel = () => ({
+        isCollapsed: false, rangeCount: 1, anchorNode: fakeText,
+        getRangeAt: () => ({ startContainer: fakeText, startOffset: 5 }),
+        toString: () => "beta line"
+      });
+      sandbox.window.getSelection = rebuildSel;
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(pos() === "Ln:2  Col:6  已选 1 行 / 9 字符  共 3 行",
+        "拖选后状态栏立即更新为选区信息，实际=" + JSON.stringify(pos()));
+
+      // 右键/菜单抢焦点把 DOM 选区清掉：位置信息不该跟着消失（用户报的就是这个现象）
+      sandbox.window.getSelection = () => ({ isCollapsed: true, rangeCount: 0, anchorNode: fakeText, toString: () => "" });
+      (documentStub.handlers.selectionchange || []).forEach(f => f());
+      assert(pos().indexOf("已选 1 行 / 9 字符") > 0,
+        "选区被抢焦点清掉后仍显示刚才的选区信息（快照），实际=" + JSON.stringify(pos()));
+
+      // 显式左键点空白＝有意取消选择 → 清掉快照，回到视口首行
+      (bigView.handlers.mouseup || []).forEach(f => f({ button: 0 }));
+      assert(/^Ln:1（视口首行）/.test(pos()), "显式左键点空白后回到视口首行，实际=" + JSON.stringify(pos()));
+
+      // 滚动后"视口首行"跟着变（只依赖 scrollTop，O(1)）
+      viewportNode.scrollTop = 2 * 22;
+      sandbox.window.getSelection = savedSel;
+      SN.cmd.edStatus();
+      assert(/^Ln:3（视口首行）/.test(pos()), "滚动到第 3 行位置后显示 Ln:3，实际=" + JSON.stringify(pos()));
+      viewportNode.scrollTop = 0;
+
+      // 非活动文档不抢状态栏（避免后台视图刷掉当前文档的位置信息）
+      SN.app.activeId = "bigA";
+      const before = pos();
+      SN.views.invoke("statusPos", "status", big);
+      assert(pos() === before, "非活动文档不写状态栏");
+
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id);
     }
 
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言

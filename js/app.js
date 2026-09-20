@@ -582,6 +582,10 @@
     // 状态栏会一直停留在上一个文档的 Ln/Col（看起来像当前文档的位置）。
     if (SN.caps && !SN.caps.can("statusPos", d)) {
       SN.$("#posLabel").textContent = SN.caps.reason("statusPos", d);
+    } else if (SN.views && SN.views.invoke) {
+      // 支持行列定位的视图自己写（大文件视图 = 选中起点/视口首行）。
+      // 静默调用：视图没实现 status() 时不打扰；值没变时视图内部会跳过 DOM 写入。
+      SN.views.invoke("statusPos", "status", d, [], true);
     }
     if (eol) eol.disabled = !!(SN.caps && !SN.caps.can("eolSwitch", d));
     updateTitle();

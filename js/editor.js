@@ -55,6 +55,7 @@
       this._caretPos = -1;      // 光标行缓存（避免滚动时全量扫描）
       this._caretLine = 0;
       this._lastSel = null;     // 最近一次有效选区 {start,end}：右键菜单/失焦后仍能拿到「刚才选了什么」
+      this._lastStatusText = null;  // 上次上报行列时的文本快照（值没变就不重复全量扫描）
       this._marksText = null;   // 已计算标记区间时的文本快照（文本未变则不重复扫描）
       this._build();
       this._lineH = null;
@@ -323,12 +324,16 @@
         }, 100);
         return;
       }
+      // 小文档没有节流：同一个光标位置 + 同一份文本就直接返回，避免重复的全量行扫描
+      //（框架现在会在切换文档/重建菜单时静默请求一次位置刷新）
+      if (caret === this._lastCaret && this.ta.value === this._lastStatusText) return;
       this._lastCaret = caret;
       this._doStatus();
     }
     _doStatus() {
       if (!this.onStatus) return;
       const v = this.ta.value;
+      this._lastStatusText = v;
       let line = 0, last = -1;
       const pos = this.ta.selectionStart;
       const cap = Math.min(pos, v.length);

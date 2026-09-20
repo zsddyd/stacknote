@@ -43,8 +43,9 @@
     big: {
       label: "大文本只读",
       // 大文件走虚拟滚动只读视图：能看、能搜、能标记、能定位行、能导出原始字节；
-      // 也能切回可编辑文本（右键「重新打开为 → 文本编辑」，会二次确认，见 app2 的 cmd.reloadAs）
-      caps: ["find", "mark", "gotoLine", "exportBytes", "rename", "reloadAsText"]
+      // 也能切回可编辑文本（右键「重新打开为 → 文本编辑」，会二次确认，见 app2 的 cmd.reloadAs）；
+      // statusPos=行列定位（语义：选中起点行/列，或"视口首行"），只有可视行参与，O(1)
+      caps: ["find", "mark", "gotoLine", "exportBytes", "rename", "reloadAsText", "statusPos"]
     },
     hex: {
       label: "Hex 只读",
@@ -115,7 +116,10 @@
     // 注意用 forDoc（取适配器），不是 of（那是能力矩阵）
     const ad = forDoc(d);
     if (!ad || typeof ad[method] !== "function") {
-      if (!silent && SN.setMsg) SN.setMsg(reason(cap, d));
+      // reason() 在该能力"已声明支持"时返回空串（说明是子动作没实现），此时也要给出非空说明，
+      // 否则状态栏会写进空串 —— 比"没反应"更让人困惑
+      const why = reason(cap, d) || ("当前视图未实现" + (NAMES[cap] || cap));
+      if (!silent && SN.setMsg) SN.setMsg(why);
       return false;
     }
     return ad[method].apply(ad, [d].concat(args || [])) !== false;

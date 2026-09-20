@@ -178,7 +178,9 @@
     }
     function visible() {
       const top = Math.max(0, Math.floor(viewport.scrollTop / ROW_H) - OVERSCAN);
-      const rows = Math.ceil(viewport.clientHeight / ROW_H) + OVERSCAN * 2;
+      // clientHeight 缺席时按 0 处理：否则 Math.ceil(undefined/22)=NaN 会让可视行窗口变成 NaN，
+      // 行循环一次都不执行（真实浏览器隐藏页面时 clientHeight=0，不受影响；这里防的是非 DOM 宿主）
+      const rows = Math.ceil((viewport.clientHeight || 0) / ROW_H) + OVERSCAN * 2;
       return { from: top, to: Math.min(lc - 1, top + rows) };
     }
     // 行节点池：滚动时只新建/更新进入视口的行，离开视口的行回收复用
@@ -280,6 +282,7 @@
       if (raf !== null) return;
       raf = requestAnimationFrame(() => {
         raf = null;
+        paintPos();               // 滚动时刷新"视口首行"（值没变时内部会跳过 DOM 写入）
         const top = viewport.scrollTop;
         if (top === lastTop) return;
         lastTop = top;
@@ -302,22 +305,109 @@
       while (n) { if (n === page) return true; n = n.parentNode; }
       return false;
     }
+    // ---------- statusPos：行列定位 ----------
+    // 大文件视图没有 caret，语义定为：有选中内容 → 选区起点行/列 + 已选行数与字符数；
+    // 无选中 → 视口首行（滚动时实时变化）+ 总行数。取值都是 O(1)，只有选区字符数随选区长度（被可视行限制）。
+    function classHit(node, cls) {
+      return !!node && !!node.className && String(node.className).split(/\s+/).indexOf(cls) >= 0;
+    }
+    function rowNodeOf(node) {
+      let n = node;
+      while (n && n !== page) {
+        if (classHit(n, "bg-row")) return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+    function isGutterNode(node) {
+      let n = node;
+      while (n && n !== page) {
+        if (classHit(n, "bg-ln")) return true;
+        n = n.parentNode;
+      }
+      return false;
+    }
+    // 行号直接读行节点里那个 .bg-ln 的文本：用户看到的数字就是它（块视图下即块序号）
+    function lineOfRow(row) {
+      if (!row) return 0;
+      let ln = null;
+      for (const c of (row.children || [])) { if (classHit(c, "bg-ln")) { ln = c; break; } }
+      if (!ln) return 0;
+      const v = parseInt(ln.textContent, 10);
+      return isFinite(v) && v > 0 ? v : 0;
+    }
+    // 实时选区的定位快照。**必须记忆**：右键菜单会抢焦点、浏览器也会在长按/右键时清掉 DOM 选区，
+    // 若只读"当前选区"，选中后一右键状态栏就退回"视口首行"（用户看到的现象）。
+    // 清理时机与 bigSel 一致：只有"左键点空白＝有意取消选择"才清。
+    let lastSelPos = null;
+    function selSnapshot() {
+      let sr = null;
+      try {
+        const sel = window.getSelection ? window.getSelection() : null;
+        sr = (sel && !sel.isCollapsed && sel.rangeCount) ? sel.getRangeAt(0) : null;
+      } catch (e) { sr = null; }
+      if (!sr) return null;
+      // 选区完全落在别处（对话框里等）→ 与本视图无关，不动它的状态
+      if (!insidePage(sr.startContainer) && !insidePage(sr.endContainer)) return null;
+      const sel = window.getSelection();
+      const str = String((sel && sel.toString()) || "");
+      if (!str) return null;
+      const node = sr.startContainer;
+      return {
+        line: lineOfRow(rowNodeOf(node)) || 0,
+        col: (node && node.nodeType === 3 && !isGutterNode(node)) ? (sr.startOffset || 0) + 1 : 1,
+        selLines: str.split("\n").length - (str.endsWith("\n") ? 1 : 0),
+        selLen: str.length
+      };
+    }
+    function posText() {
+      const total = doc.bigChunkMode ? (doc.bigChunks || lc) : (doc.bigLineCount || lc);
+      const first = Math.floor((viewport.scrollTop || 0) / ROW_H) + 1;
+      // 实时选区优先，其次"菜单/抢焦点之前"的记录（与右键菜单以打开那一刻的选区为准同一原则）
+      const sp = selSnapshot() || lastSelPos;
+      if (sp && sp.selLen > 0) {
+        return "Ln:" + (sp.line || first) + "  Col:" + sp.col + "  已选 " + sp.selLines + " 行 / " + sp.selLen
+          + " 字符  共 " + total.toLocaleString() + " 行";
+      }
+      return doc.bigChunkMode
+        ? "块:" + first + "/" + total.toLocaleString() + "（行数过多，按固定块显示）"
+        : "Ln:" + first + "（视口首行）  共 " + total.toLocaleString() + " 行";
+    }
+    let lastPos = "";
+    function paintPos() {
+      if (SN.activeDoc && SN.activeDoc() !== doc) return;   // 只写当前活动文档的状态栏
+      const label = SN.$("#posLabel");
+      if (!label) return;
+      const t = posText();
+      if (t === lastPos) return;                            // 值没变就别动 DOM
+      lastPos = t;
+      label.textContent = t;
+    }
+    doc._bigPaintPos = paintPos;      // 供框架/测试触发一次刷新（与 _bigJump 同类钩子）
     // 记录本视图内的选区（等效于 textarea 失焦仍保留选区）：
     // 关键点——折叠（右键、菜单抢焦点、点空白）**不改写记忆**，否则右键菜单拿到的永远是空选区，
     // 「标记颜色/复制选中内容」会静默失效（提示「请先选中要高亮的文本」）。
     document.addEventListener("selectionchange", () => {
       const sel = window.getSelection && window.getSelection();
       if (!sel || !sel.anchorNode || !insidePage(sel.anchorNode)) return;
-      if (sel.isCollapsed) return;
-      const t = (sel.toString() || "").trim();
-      if (t && t.length <= 4096) bigSel = t;
+      if (!sel.isCollapsed) {
+        const t = (sel.toString() || "").trim();
+        if (t && t.length <= 4096) bigSel = t;
+      }
+      const snap = selSnapshot();
+      if (snap) lastSelPos = snap;   // 只记有效选区；折叠不在这里清（交给"显式左键点击"）
+      paintPos();   // 选区变化（含折叠回光标）都要刷新行列/已选信息
     });
     // 左键点空白处＝有意取消选择，此时才清记忆（右键 mouseup 是 button=2，不动它）
     page.addEventListener("mouseup", (e) => {
       if (e && e.button !== undefined && e.button !== 0) return;
       const sel = window.getSelection && window.getSelection();
-      if (sel && sel.isCollapsed) bigSel = "";
+      if (sel && sel.isCollapsed) { bigSel = ""; lastSelPos = null; }
+      paintPos();   // 拖选结束也在这里补一次（不依赖 selectionchange 是否触发）
     });
+    // 拖选在视口外结束（拖到状态栏等）时 page 收不到 mouseup：文档级补一次，
+    // 只刷新不清理（清理只认"左键点在视图内且选区已折叠"这一种明确信号）
+    document.addEventListener("mouseup", () => paintPos());
     doc.bigSelected = () => bigSel;
     // 右键菜单在打开那一刻把目标固定下来（见下方 contextMenu）：与文本视图「还原选区」等价
     doc.bigSetSelected = (kw) => { bigSel = String(kw == null ? "" : kw).trim().slice(0, 4096); };
@@ -412,6 +502,7 @@
       lastTop = -1;
       size();
       setBottomMeta();
+      paintPos();              // 行索引就绪后才算得出总行数
     }, (p) => {
       if (!(p < 1)) return;
     });
@@ -430,6 +521,8 @@
       return true;
     },
     jumpToLine: (doc, n) => { if (doc._bigJump) doc._bigJump(n); },
+    // 行列定位（statusPos）：选中内容 → 起点行/列 + 已选统计；无选中 → 视口首行 + 总行数
+    status: (doc) => { if (doc._bigPaintPos) doc._bigPaintPos(); return true; },
     selectionKeyword: (doc) => (doc.bigSelected && doc.bigSelected()) || "",
     clearMarks: (doc) => { if (doc.bigClearMarks) doc.bigClearMarks(); },
     markSelection: (doc, color) => {
