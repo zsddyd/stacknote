@@ -184,16 +184,18 @@ label{user-select:none}
 .colorbar.on{outline:2px solid var(--accent)}
 
 /* ---------- 大文件只读视图 ---------- */
-/* 行号列宽的唯一来源：行号 span 与下面那条底色/分割线层都读它。
+/* 行号列宽的唯一来源：行号 span（以及它在 JS 里对应的横向滚动预留）都读它。
    注意 *{box-sizing:border-box}，所以这里 64px 是「含 padding 的 border box」，
    行号 span 实际占位就是 64px、正文紧接其后；两边同源后不会各写一个数值而互相错位 */
 .bigview{--bg-ln-w:64px}
-.bg-ln{display:inline-block;width:var(--bg-ln-w);padding-right:8px;text-align:right;
-  color:var(--ed-line-num);user-select:none}
-/* 行号栏底色 + 与正文的分割线：绝对定位铺满内容高度（虚拟滚动下行节点会被复用，不能逐行画线）。
-   1px 线落在本条宽度内（border-box），因此永远在正文左侧 4px 处，不会压到首字符 */
-.bg-gutter{position:absolute;left:0;top:0;bottom:0;width:var(--bg-ln-w);box-sizing:border-box;
-  background:var(--ed-gutter-bg);border-right:1px solid var(--border);pointer-events:none}
+/* 行号栏：每行自带底色与分割线，并用 position:sticky 钉在左侧 ——
+   横向滚动查看长行时，行号列必须保持可见（与文本视图 .ed-gutter 的行为一致）。
+   1px 线落在本条宽度内（border-box），因此永远在正文左侧 4px 处，不会压到首字符。
+   注意：行节点上不能有 overflow:hidden，否则最近裁剪祖先变成行节点、sticky 会失效。 */
+.bg-ln{display:inline-block;position:sticky;left:0;z-index:1;
+  width:var(--bg-ln-w);padding-right:8px;text-align:right;box-sizing:border-box;
+  color:var(--ed-line-num);user-select:none;
+  background:var(--ed-gutter-bg);border-right:1px solid var(--border)}
 
 /* ---------- 其它 ---------- */
 .hex-view{font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px;line-height:1.5;

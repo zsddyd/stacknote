@@ -47,6 +47,19 @@
       doc.lineStarts = starts;
       doc.bigLineCount = starts.length - 1;
     }
+    // 最长行（字节数）：横向滚动条的内容宽度要靠它。索引本来就扫过每个字节，
+    // 这里只是在 starts 上再走一遍 O(行数)，不引入第二次全文扫描。
+    // 按字节估宽对多字节字符（UTF-8 汉字 3 字节 / 显示 2 列）会偏大 → 只会多留空白，不会裁掉内容。
+    let maxLen = 0;
+    if (!doc.bigChunkMode) {
+      for (let i = 0; i + 1 < starts.length; i++) {
+        const len = starts[i + 1] - starts[i] - 1;
+        if (len > maxLen) maxLen = len;
+      }
+    } else {
+      maxLen = doc.bigChunkSize;      // 块视图：每行就是一个固定大小的块
+    }
+    doc.bigMaxLineBytes = Math.max(0, maxLen);
     if (onDone) onDone();
   }
 
@@ -156,10 +169,6 @@
     // 视口
     const viewport = el("div", { class: "bg-viewport", style: "flex:1;overflow:auto;position:relative;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:14px;line-height:22px" });
     const inner = el("div", { class: "bg-inner", style: "position:relative" });
-    // 行号栏底色 + 与正文的分割线：文本视图由 .ed-gutter 提供，大文件视图的行号是「每行一个 .bg-ln」，
-    // 行节点会被虚拟滚动复用/回收，不能靠每行自己画线；这里单独铺一条铺满内容高度的底色层。
-    // 先插入，后插入的行节点始终画在它上面（行本身透明，底色从这层透出来）。
-    inner.appendChild(el("div", { class: "bg-gutter" }));
     viewport.appendChild(inner);
     page.appendChild(viewport);
 
@@ -180,8 +189,44 @@
     const langHint = SN.langById(doc.lang);
     const lineTxt = makeLineText(doc);
 
+    // ---------- 横向滚动：内容宽度 ----------
+    // 长行必须能左右拖动查看（只读视图不支持自动换行，更不能把长行裁掉）。
+    // 做法：给内容层一个"最长行"的宽度，让视口产生横向溢出；行号列用 position:sticky 钉在左侧不跟着跑。
+    let charW = 0;
+    function charWidth() {
+      if (charW > 0) return charW;
+      // 量一次等宽字体的单字符宽度（缩放后会清零重算）；量不出来（无布局环境）按 0.6em 估
+      try {
+        const probe = document.createElement("span");
+        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-family:inherit;font-size:"
+          + SN.zoomMetrics(doc.bigZoom || 100).fs + "px";
+        probe.textContent = "0000000000";
+        page.appendChild(probe);
+        const w = probe.offsetWidth || 0;
+        if (probe.parentNode) probe.parentNode.removeChild(probe);
+        if (w > 0) charW = w / 10;
+      } catch (e) { /* ignore */ }
+      if (!(charW > 0)) charW = Math.round(SN.zoomMetrics(doc.bigZoom || 100).fs * 0.6);
+      return charW;
+    }
+    function gutterWidth() {
+      // 行号列宽的唯一来源是 css/sn.css 的 --bg-ln-w（量不到就与它的兜底值保持一致）
+      try {
+        const v = getComputedStyle(page).getPropertyValue("--bg-ln-w");
+        const n = parseFloat(v);
+        if (n > 0) return n;
+      } catch (e) { /* 非浏览器环境 */ }
+      return 64;
+    }
+    const MAX_CONTENT_W = 10000000;   // 上限：远大于浏览器元素宽度上限之内的实用范围，避免病态行撑爆滚动条
+    function contentWidth() {
+      const est = (doc.bigMaxLineBytes || 0) * charWidth();
+      const want = gutterWidth() + est + 16;
+      return Math.round(Math.min(MAX_CONTENT_W, Math.max(viewport.clientWidth || 0, want)));
+    }
     function size() {
       inner.style.height = (lc * rowH) + "px";
+      inner.style.width = contentWidth() + "px";
       paint();
     }
     function visible() {
@@ -197,7 +242,10 @@
     function makeRow() {
       const row = document.createElement("div");
       row.className = "bg-row";
-      row.style.cssText = "position:absolute;left:0;right:0;height:" + rowH + "px;white-space:pre;overflow:hidden;box-sizing:border-box;padding-left:4px";
+      // 注意不要给行加 overflow:hidden：那会让行号 span 的 position:sticky 以"行"为滚动容器而失效
+      //（sticky 只认最近的滚动/裁剪祖先），于是横向滚动时行号列会跟着跑出视野。
+      // 行宽 = 内容层宽度（inner 的 width 由最长行决定），所以这里也不需要裁剪。
+      row.style.cssText = "position:absolute;left:0;right:0;height:" + rowH + "px;white-space:pre;box-sizing:border-box;padding-left:4px";
       const no = document.createElement("span");
       no.className = "bg-ln";
       // 行号列的宽度不在内联里写死：与行号栏底色/分割线共用 css/sn.css 的 --bg-ln-w。
@@ -313,6 +361,7 @@
       const m = SN.zoomMetrics(z);
       doc.bigZoom = z;
       rowH = m.lh;
+      charW = 0;                // 字号变了，字符宽度得重新量
       viewport.style.fontSize = m.fs + "px";
       viewport.style.lineHeight = rowH + "px";
       invalidateRows();

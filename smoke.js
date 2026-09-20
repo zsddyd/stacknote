@@ -1113,10 +1113,11 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         "大文件右键「标记颜色」把目标词标记出来，实际=" + JSON.stringify(big.bigMarks));
       assert(big.bigMarks[0].color === SN.app.MARK_COLORS[3], "标记用的是刚点的那个颜色");
       SN.menu.closeCtx();
-      // 大文件视图的行号栏要有底色与分割线：行节点会被虚拟滚动复用，靠的是单独一条铺满高度
-      // 的装饰层（.bg-gutter），所以要断言它确实存在且只有一条
-      const strips = byClass(big.pageEl, "bg-gutter");
-      assert(strips.length === 1, "大文件视图有且只有一条行号栏底色/分割线层，实际=" + strips.length);
+      // 行号栏改为「每行 .bg-ln 自带底色/分割线 + position:sticky 钉在左侧」：
+      // 素材是行节点自己的，这里断言渲染出来的行确实带这个 class（CSS 规则由下面 ⑬ 静态护栏校验）
+      await new Promise(r => setTimeout(r, 30));   // 等行索引 + 首屏虚拟行渲染
+      const lnCells = byClass(big.pageEl, "bg-ln");
+      assert(lnCells.length > 0, "大文件视图的行号栏由行内 .bg-ln 承担（旧的全高装饰层已移除）");
       SN.app.docs = SN.app.docs.filter(d => d.id !== big.id);
     }
 
@@ -1128,18 +1129,25 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(/\.mi\.sep\{[^}]*cursor:default/.test(css), "分隔线用默认光标（不再是手型）");
       assert(/\.mi\.sep\{[^}]*pointer-events:none/.test(css), "分隔线不参与 hover（划过时上一项保持高亮）");
       assert(/#ctxmenu \.mi\.sep\{padding:0\}/.test(css), "右键菜单里分隔线不带条目内边距（否则会变成粗条）");
-      // 大文件行号栏：底色/分割线必须来自主题变量，且「行号列宽」必须单一来源
+      // 大文件行号栏：底色/分割线必须来自主题变量，横向滚动时必须钉在左侧，且「行号列宽」单一来源
       // （两边各写一个宽度就是上一版分割线压到首字符的原因）
-      assert(/\.bg-gutter\{[^}]*background:var\(--ed-gutter-bg\)/.test(css),
+      assert(/\.bg-ln\{[^}]*background:var\(--ed-gutter-bg\)/.test(css),
         "大文件行号栏用主题的行号槽底色（--ed-gutter-bg）");
-      assert(/\.bg-gutter\{[^}]*border-right:1px solid var\(--border\)/.test(css),
+      assert(/\.bg-ln\{[^}]*border-right:1px solid var\(--border\)/.test(css),
         "大文件行号栏与正文之间有 1px 分割线");
-      assert(/\.bg-gutter\{[^}]*position:absolute/.test(css), "行号栏装饰层用绝对定位铺满内容高度");
+      assert(/\.bg-ln\{[^}]*position:sticky[^}]*left:0/.test(css),
+        "行号栏 position:sticky 钉在左侧：横向滚动查看长行时行号不会跑出视野");
       assert(/\.bigview\{--bg-ln-w:/.test(css), "行号列宽由 --bg-ln-w 定义（作用域在大文件视图上）");
       assert(/\.bg-ln\{[^}]*width:var\(--bg-ln-w\)/.test(css), "行号 span 的宽度来自 --bg-ln-w");
-      assert(/\.bg-gutter\{[^}]*width:var\(--bg-ln-w\)/.test(css), "分割线层的宽度来自同一个 --bg-ln-w");
+      // 行节点上不能有 overflow:hidden —— 那会让最近裁剪祖先变成行节点，sticky 失效
+      assert(/\.bg-row\{/.test(css) ? !/\.bg-row\{[^}]*overflow:hidden/.test(css) : true,
+        "行节点不能带 overflow:hidden（会让行号的 sticky 失效）");
       const bigSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
       assert(bigSrc.indexOf("width:64px") < 0, "bigtext.js 不再硬编码行号列宽：内联 width 会盖掉 CSS 造成错位");
+      assert(bigSrc.indexOf("overflow:hidden") < 0 || bigSrc.indexOf("white-space:pre;overflow:hidden") < 0,
+        "bigtext.js 的行节点不再用 overflow:hidden 裁剪（长行要能横向滚动查看）");
+      assert(/inner\.style\.width = contentWidth\(\)/.test(bigSrc),
+        "内容层宽度由最长行决定（否则长行只会被裁掉、无法左右拖动）");
     }
 
     // ⑭ 打开入口统一 + 视图自动识别 + 「重新打开为 …」三向切换
@@ -1475,6 +1483,59 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       SN.app.zoomPct = 100;
       SN.cmd.zoom(0);                                   // 广播回 100%，避免影响后续段落
       SN.app.docs = SN.app.docs.filter(x => x.id !== big.id && x.id !== big2.id && x.id !== dtNew.id);
+    }
+
+    // ⑱ 横向滚动：长行必须能左右拖动查看（内容层要有按"最长行"算出的宽度，行号列 sticky 在左侧）
+    {
+      const longLine = "L" + "x".repeat(600) + "TAIL";       // 一行 605 字符，远超视口宽度
+      const big = {
+        id: "wideBig", name: "wide.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("short\n" + longLine + "\nshort2\n")
+      };
+      SN.addDoc(big);
+      SN.activateDoc(big.id);
+      await new Promise(r => setTimeout(r, 40));            // 等行索引（最长行在这里统计）
+      const bigView = big.pageEl.children[0];
+      const viewportNode = bigView.children[0];
+      const innerNode = viewportNode.children[0];
+      viewportNode.clientHeight = 240;
+      viewportNode.clientWidth = 400;                       // 桩没有布局：给个视口宽度
+      big._bigApplyZoom(100);                               // 触发一次 size()，按当前宽度重算内容宽度
+      await new Promise(r => setTimeout(r, 20));
+
+      // 索引阶段顺带算出最长行（字节数），这是横向滚动宽度的唯一依据
+      assert(big.bigMaxLineBytes === longLine.length,
+        "建行索引时顺带统计最长行，实际=" + big.bigMaxLineBytes + " 期望=" + longLine.length);
+      const charW = Math.round(SN.zoomMetrics(100).fs * 0.6);   // 桩量不出字形宽度 → 代码按 0.6em 兜底
+      const innerW = parseInt(innerNode.style.width, 10);
+      assert(innerW >= longLine.length * charW,
+        "内容层宽度按最长行撑开（长行可左右拖动），实际=" + innerW + " 期望≥" + (longLine.length * charW));
+      assert(innerW > (viewportNode.clientWidth || 0),
+        "内容层必须宽于视口才会出现横向滚动条，实际=" + innerW + " 视口=" + viewportNode.clientWidth);
+
+      // 窗口很窄也一样能横向滚动；而短文件不应白留横向空白（宽度只按最长行算）
+      const bigNarrow = {
+        id: "narrowBig", name: "narrow.log", kind: "big", enc: "utf8", eol: "lf", lang: "txt",
+        content: "", raw: new TextEncoder().encode("a\nbb\nccc\n")
+      };
+      SN.addDoc(bigNarrow);
+      await new Promise(r => setTimeout(r, 40));
+      const nView = bigNarrow.pageEl.children[0];
+      const nViewport = nView.children[0];
+      nViewport.clientHeight = 240;
+      nViewport.clientWidth = 400;
+      bigNarrow._bigApplyZoom(100);
+      await new Promise(r => setTimeout(r, 20));
+      const nInnerW = parseInt(nViewport.children[0].style.width, 10);
+      assert(nInnerW === 400, "短行文件的内容层宽度铺满视口即可（不额外留横向空白），实际=" + nInnerW);
+
+      // 缩放后字符变宽 → 内容宽度必须重算
+      big._bigApplyZoom(200);
+      await new Promise(r => setTimeout(r, 20));
+      const innerW200 = parseInt(innerNode.style.width, 10);
+      assert(innerW200 > innerW, "放大后内容宽度跟着变宽（字符宽度重算），150→" + innerW + " / 200→" + innerW200);
+
+      SN.app.docs = SN.app.docs.filter(x => x.id !== big.id && x.id !== bigNarrow.id);
     }
 
     // 收尾：把活动文档与文档表还原，别影响后续段落与前后的既有断言
