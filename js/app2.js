@@ -1163,6 +1163,9 @@
       }
     });
   };
+  // 关于对话框里展示的仓库与联系方式（两行，排在「功能特性」之前）
+  const ABOUT_REPO = "https://github.com/zsddyd/stacknote";
+  const ABOUT_MAIL = "stacknote@zsddyd.com";
   dlg.about = function () {
     SN.openModal({
       title: "关于 StackNote",
@@ -1174,6 +1177,15 @@
         head.appendChild(el("span", { class: "about-ver", text: "版本：" + ver }));
         b.appendChild(head);
         b.appendChild(el("div", { class: "about-desc", text: "零依赖、零构建的纯前端多标签文本编辑器。" }));
+
+        const repoLine = el("div", { class: "about-meta" });
+        repoLine.appendChild(el("span", { text: "仓库地址：" }));
+        repoLine.appendChild(el("a", { href: ABOUT_REPO, target: "_blank", rel: "noopener noreferrer", text: ABOUT_REPO }));
+        b.appendChild(repoLine);
+        const mailLine = el("div", { class: "about-meta" });
+        mailLine.appendChild(el("span", { text: "联系我们：" }));
+        mailLine.appendChild(el("a", { href: "mailto:" + ABOUT_MAIL, text: ABOUT_MAIL }));
+        b.appendChild(mailLine);
 
         b.appendChild(el("div", { class: "about-sec", text: "功能特性" }));
         const feats = [

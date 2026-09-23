@@ -384,6 +384,19 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     SN.cmd.convertTo("utf8bom");
     assert(d0.enc === "utf8bom", "convertTo");
     SN.dlg.about();
+    // 关于对话框：仓库地址与联系方式两行，且排在「功能特性」之前
+    {
+      const aboutTexts = [];
+      walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) aboutTexts.push(n.textContent); });
+      const aboutText = aboutTexts.join("|");
+      assert(aboutText.indexOf("仓库地址：") >= 0 && aboutText.indexOf("https://github.com/zsddyd/stacknote") >= 0,
+        "关于里给出仓库地址");
+      assert(aboutText.indexOf("联系我们：") >= 0 && aboutText.indexOf("stacknote@zsddyd.com") >= 0,
+        "关于里给出联系方式");
+      assert(aboutText.indexOf("仓库地址：") < aboutText.indexOf("功能特性") &&
+        aboutText.indexOf("联系我们：") < aboutText.indexOf("功能特性"),
+        "仓库与联系方式两行排在「功能特性」之前");
+    }
     SN.closeModal();
     // 「主题与语法样式」点卡片要真正落盘（曾只改预览：themes.js 写 SN.settings，保存读 app.settings）
     const odpPanel = SN.chromeOf(SN.getTheme("onedarkpro"))["--panel"];

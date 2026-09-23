@@ -222,6 +222,11 @@ label{user-select:none}
 .about-name{font-size:16px;font-weight:bold;color:var(--text)}
 .about-ver{font-size:12.5px;color:var(--text-weak)}
 .about-desc{margin:6px 0 2px;font-size:12.5px;color:var(--text)}
+/* 关于对话框里的仓库地址/联系方式：两行，排在「功能特性」之前；链接用正文色 + 下划线，
+   保证在 15 套主题下都达到正文对比度（强调色在浅色底上不足以承担文字） */
+.about-meta{font-size:12.5px;line-height:1.7;color:var(--text);margin:1px 0}
+.about-meta a{color:var(--text);text-decoration:underline;word-break:break-all}
+.about-meta a:hover{background:var(--selection);color:#fff;text-decoration:none;border-radius:2px}
 .about-sec{font-weight:bold;font-size:13px;color:var(--text);margin:10px 0 4px}
 .about-li{font-size:12.5px;line-height:1.55;color:var(--text);padding-left:13px;position:relative;margin:1px 0}
 .about-li::before{content:"•";position:absolute;left:0;color:var(--accent)}
