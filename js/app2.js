@@ -840,7 +840,7 @@
   function buildHexView(doc) {
     const page = el("div", { class: "hexviewer", style: "display:flex;flex-direction:column;height:100%" });
     const bar = el("div", { class: "dockhead", style: "flex:0 0 auto" });
-    const info = el("span", { text: doc.name + " — " + SN.fmtSize(doc.raw ? doc.raw.length : doc.size || 0) + "（只读，每页 64 行 × 16 字节）" });
+    const info = el("span", { text: doc.name + "：" + SN.fmtSize(doc.raw ? doc.raw.length : doc.size || 0) + "（只读，每页 64 行 × 16 字节）" });
     const tools = el("span", {});
     const prevB = el("button", { text: "上一页" });
     const nextB = el("button", { text: "下一页" });
@@ -876,7 +876,7 @@
         html += "\n";
       }
       out.innerHTML = html;
-      info.textContent = doc.name + " — 偏移 0x" + start.toString(16) + " / 0x" + total.toString(16);
+      info.textContent = doc.name + "：偏移 0x" + start.toString(16) + " / 0x" + total.toString(16);
       prevB.disabled = start <= 0;
       nextB.disabled = start + doc.hexPageSize >= total;
     }
@@ -1108,7 +1108,7 @@
         for (const p of pluginList()) {
           const tr = el("tr");
           tr.appendChild(el("td", { text: p.name }));
-          tr.appendChild(el("td", { text: p.desc || "—" }));
+          tr.appendChild(el("td", { text: p.desc || "-" }));
           tr.appendChild(el("td", { text: p.insert ? "插入" : "变换" }));
           const td = el("td");
           const runBt = el("button", { text: "运行" });
@@ -1234,12 +1234,12 @@
           tr.appendChild(el("td", { text: name }));
           kinds.forEach(k => tr.appendChild(el("td", {
             class: "capcell" + (SN.caps.can(cap, { kind: k }) ? " yes" : " no"),
-            text: SN.caps.can(cap, { kind: k }) ? "✓" : "—"
+            text: SN.caps.can(cap, { kind: k }) ? "✓" : "×"
           })));
           tbl.appendChild(tr);
         });
         b.appendChild(tbl);
-        b.appendChild(el("div", { class: "hint", text: "✓ 支持　— 不支持　（定义见 js/viewcaps.js）" }));
+        b.appendChild(el("div", { class: "hint", text: "✓ 支持　× 不支持　（定义见 js/viewcaps.js）" }));
       }
     });
   };
@@ -1344,12 +1344,12 @@ SN.openModal({
             tr.appendChild(el("td", { text: it.label }));
             // 标出当前视图下不可用的键（能力来自 js/viewcaps.js），与菜单置灰同一判据
             const why = SN.shortcuts.blockedReason(it, SN.activeDoc());
-            tr.appendChild(el("td", { text: (it.accel || "—") + (why ? "（" + why + "）" : "") }));
+            tr.appendChild(el("td", { text: (it.accel || "-") + (why ? "（" + why + "）" : "") }));
             tbl.appendChild(tr);
           });
           b.appendChild(tbl);
         });
-        b.appendChild(el("div", { class: "hint", text: "本表来自 js/shortcuts.js：菜单右侧提示、实际按键响应与此处一览同源，改键后三处一起变。撤销/重做在文本域内也按本表判定；剪切/复制/粘贴/全选为浏览器原生行为；缩放用工具栏 ＋/－；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
+        b.appendChild(el("div", { class: "hint", text: "本表来自 js/shortcuts.js：菜单右侧提示、实际按键响应与此处一览同源，改键后三处一起变。撤销/重做在文本域内也按本表判定；剪切/复制/粘贴/全选为浏览器原生行为；缩放用工具栏的放大/缩小按钮；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
       }
     });
   };

@@ -361,7 +361,8 @@
       const svg = SN.uiIcons ? SN.uiIcons.get(key) : "";
       const b = el("button", {
         class: "iconbt" + (def.toggle && def.toggle() ? " on" : "") + (why ? " disabled" : ""),
-        title: why ? (def.t + " — " + why) : def.t,
+        // 置灰原因跟在标题后：用全角冒号，不用破折号（破折号是 AI 味最重的排版习惯之一）
+        title: why ? (def.t + "：" + why) : def.t,
         html: svg || null,
         text: svg ? null : def.g
       });

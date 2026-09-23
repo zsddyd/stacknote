@@ -751,7 +751,9 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(capAll.indexOf("视图能力表") >= 0, "能力表对话框已打开");
       assert(capAll.indexOf("文本编辑") >= 0 && capAll.indexOf("大文本只读") >= 0 && capAll.indexOf("Hex 只读") >= 0, "三种视图列都在");
       assert(capAll.indexOf("（当前）") >= 0, "标出当前视图列");
-      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("—") >= 0, "支持/不支持都有展示");
+      // 支持用 ✓、不支持用 ×（不再用破折号当占位符：破折号在界面文案里一律不用）
+      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("×") >= 0, "支持/不支持都有展示");
+      assert(capAll.indexOf("—") < 0, "能力表里不再出现破折号占位符");
       assert(capCells.length === SN.caps.DISPLAY.length * 3, "每项能力三列都有单元格，实际=" + capCells.length);
       SN.closeModal();
 

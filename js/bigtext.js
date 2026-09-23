@@ -558,7 +558,7 @@
     function setBottomMeta() {
       const bm = SN.$("#msgLabel");
       if (!bm) return;
-      bm.textContent = doc.name + " — 大文本只读(虚拟滚动) · " + SN.fmtSize(doc.raw ? doc.raw.length : 0)
+      bm.textContent = doc.name + "：大文本只读（虚拟滚动） · " + SN.fmtSize(doc.raw ? doc.raw.length : 0)
         + " · " + SN.codeById(doc.enc).name
         + (doc.bigChunkMode ? " · 块视图" : " · 约 " + (doc.bigLineCount || lc).toLocaleString() + " 行");
     }

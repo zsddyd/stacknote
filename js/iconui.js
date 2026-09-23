@@ -80,6 +80,6 @@
     has: (name) => Object.prototype.hasOwnProperty.call(PATHS, name),
     names: () => Object.keys(PATHS),
     PATHS,          // 供测试/二次加工
-    source: "Tabler Icons (MIT) — https://github.com/tabler/tabler-icons"
+    source: "Tabler Icons (MIT), https://github.com/tabler/tabler-icons"
   };
 })();
