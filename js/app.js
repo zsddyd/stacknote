@@ -989,7 +989,10 @@
         foot.appendChild(bn);
       }
     }
-    dlgEl.appendChild(foot);
+    // 只有真正有动作按钮时才渲染底部条：纯展示类对话框（关于/能力表/快捷键一览…）
+    // 靠右上角 ×（以及 Esc / 点遮罩）关闭，不再重复放一个"关闭"按钮，
+    // 否则右上角与右下角是同一个语义，底部还会多出一条空的分隔线
+    if (foot.children.length) dlgEl.appendChild(foot);
     mask.appendChild(dlgEl);
     mask.addEventListener("click", (e) => { if (e.target === mask) closeModal(); });
     host.appendChild(mask);

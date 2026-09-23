@@ -654,7 +654,6 @@
           setMsg("共找到 " + res.length + " 处（查找范围：" + (sc === "docs" ? "所有打开文件" : "当前文件") + "）");
         }
       },
-      buttons: [{ label: "关闭", action: () => { } }]
     });
     return m;
   };
@@ -976,7 +975,6 @@
       buttons: [
         { label: "选择文件…", action: () => $("#hashFile").click() },
         { label: "计算选中文本", primary: true, disabled: !!selWhy, title: selWhy, action: () => calc("sel") },
-        { label: "关闭", action: () => { } }
       ],
       onOpen(b) {
         const algo = el("select", { id: "hashAlgo" });
@@ -1026,7 +1024,7 @@
         });
         setMsg("已将 " + n + " 个文档标记为 " + SN.codeById(code).name);
         SN.updateStatusLabel();
-      } }, { label: "关闭", action: () => { } }],
+      } }],
       onOpen(b) {
         const sel = el("select", { id: "batchCode" });
         SN.CODES.filter(c => c.writable).forEach(c => sel.appendChild(el("option", { value: c.id, text: c.name })));
@@ -1089,7 +1087,7 @@
     SN.openModal({
       title: "插件管理器",
       width: "680px",
-      buttons: [{ label: "添加用户插件…", action: () => addUserPlugin() }, { label: "关闭", action: () => { } }],
+      buttons: [{ label: "添加用户插件…", action: () => addUserPlugin() }],
       onOpen(b) {
         const tbl = el("table", { class: "tbl" });
         const tr0 = el("tr");
@@ -1174,7 +1172,6 @@
     SN.openModal({
       title: "关于 StackNote",
       width: "580px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         const ver = window.SN_VERSION || "dev";
         const head = el("div", { class: "about-head" });
@@ -1211,7 +1208,6 @@
     SN.openModal({
       title: "视图能力表",
       width: "560px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         b.appendChild(el("div", { class: "hint", text: "三种视图支持哪些功能（只读展示）。菜单、工具栏与快捷键按本表置灰；当前视图：" + SN.caps.label(SN.activeDoc()) }));
         const tbl = el("table", { class: "tbl captbl" });
@@ -1295,7 +1291,6 @@ SN.openModal({
     SN.openModal({
       title: "主题与语法样式（预览切换）",
       width: "700px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         const grid = el("div", { style: "display:grid;grid-template-columns:repeat(3,1fr);gap:6px" });
         for (const t of SN.EDITOR_THEMES) {
@@ -1319,7 +1314,6 @@ SN.openModal({
   dlg.shortcuts = function () {
     SN.openModal({
       title: "快捷键一览",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         // 直接渲染统一快捷键表：与菜单提示、实际按键响应同源，改键后此处自动跟随
         SN.shortcuts.groups().forEach(g => {
