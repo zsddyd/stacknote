@@ -223,11 +223,6 @@ label{user-select:none}
 /* 键盘导航高亮与 :hover 同款（菜单打开后焦点在 #ctxmenu 上，方向键移动） */
 #ctxmenu .mi.kb:not(.sep):not(.disabled){background:var(--selection);color:#fff}
 #ctxmenu .mi.kb:not(.sep):not(.disabled) .accel{color:#eee}
-.md-preview{flex:1;overflow:auto;padding:14px 18px;font-family:"Microsoft YaHei",sans-serif;background:var(--panel2)}
-.md-preview pre{background:var(--panel);padding:8px;border:1px solid var(--border);overflow:auto}
-.md-preview code{font-family:ui-monospace,Consolas,Menlo,monospace}
-.md-preview table{border-collapse:collapse}
-.md-preview td,.md-preview th{border:1px solid var(--border);padding:2px 8px}
 .hint{color:var(--text-weak);font-size:12px;margin:2px 0}
 .about-head{display:flex;align-items:baseline;gap:10px}
 .about-name{font-size:16px;font-weight:bold;color:var(--text)}

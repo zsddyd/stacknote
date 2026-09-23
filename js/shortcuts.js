@@ -34,7 +34,6 @@
     // 统一查找对话框本身在所有视图都可用（作用域按钮会按能力禁用），故不设 requires
     { id: "find.open", group: "查找", label: "查找…", accel: "Ctrl+F", where: "global", run: () => SN.dlg.find({ scope: "doc" }) },
     { id: "find.openDocs", group: "查找", label: "查找…（默认查所有打开文件）", accel: "Ctrl+Shift+F", where: "global", run: () => SN.dlg.find({ scope: "docs" }) },
-    { id: "find.replace", group: "查找", label: "替换…", accel: "Ctrl+H", where: "global", requires: "replace", run: () => SN.dlg.find({ scope: "doc", replace: true }) },
     { id: "find.next", group: "查找", label: "查找下一个", accel: "F3", where: "global", requires: "findStep", run: () => SN.dlg.findNext() },
     { id: "find.prev", group: "查找", label: "查找上一个", accel: "F4", where: "global", requires: "findStep", run: () => SN.dlg.findPrev() },
 

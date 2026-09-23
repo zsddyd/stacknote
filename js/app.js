@@ -228,7 +228,6 @@
   function findMenuItems() {
     return [
       { label: "查找…", sc: "find.open" },
-      { label: "替换…", sc: "find.replace", requires: "replace" },
       { label: "查找下一个", sc: "find.next", requires: "findStep" },
       { label: "查找上一个", sc: "find.prev", requires: "findStep" },
       "-",
@@ -340,7 +339,6 @@
     redo: { t: "重做", g: "↻", requires: "undo", a: () => edCmd("redo") },
     sep3: "-",
     find: { t: "查找", g: "🔍", a: () => dlg.find({ scope: "doc" }) },
-    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find({ scope: "doc", replace: true }) },
     mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",

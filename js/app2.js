@@ -524,7 +524,7 @@
   // 统一查找入口：不再区分「查找…」与「在打开的文档中查找…」，
   // 都在同一个对话框里输入关键字，再用两个按钮选择作用域：
   //   当前文件中查找 / 查找所有打开文件
-  // opts: { scope: "doc"(默认) | "docs", replace: true 表示从「替换…」进入 }
+  // opts: { scope: "doc"(默认) | "docs" }
   dlg.find = function (opts) {
     const o = typeof opts === "string" ? { scope: opts === "opendocs" ? "docs" : "doc" } : (opts || {});
     const ed = SN.activeEditor();
@@ -533,7 +533,7 @@
     const canFindHere = !!d && SN.caps.can("find", d);
     if (ed && !app.findOpt.keyword && ed.hasSelection()) app.findOpt.keyword = ed.selectedText().slice(0, 200);
     const m = SN.openModal({
-      title: o.replace ? "查找 / 替换" : "查找",
+      title: "查找",
       width: "560px",
       onOpen(body) {
         const rows = [];
@@ -558,7 +558,6 @@
           mk(subBtns, "查找下一个", () => doFindNext(true));
           mk(subBtns, "查找上一个", () => doFindNext(false));
           mk(subBtns, "全部标记", () => { collectOpts(); cmd.markKeyword(); });
-          mk(subBtns, "替换全部", () => doReplaceAll());
         }
         body.appendChild(fieldset("", rows, scopeBtns));
         if (subBtns.children.length) body.appendChild(el("div", { class: "findrow", style: "margin-top:6px" }, [subBtns]));
@@ -653,15 +652,6 @@
             if (ad.jumpToLine) ad.jumpToLine(d, res[0].line);
           }
           setMsg("共找到 " + res.length + " 处（查找范围：" + (sc === "docs" ? "所有打开文件" : "当前文件") + "）");
-        }
-        function doReplaceAll() {
-          collectOpts();
-          if (app.findOpt.regex && app.findOpt.keyword) {
-            const re = new RegExp(app.findOpt.keyword, app.findOpt.case ? "g" : "gi");
-            mutateDocText(v => v.replace(re, ""));
-            setMsg("正则替换：以空串替换（演示）");
-          }
-          setMsg("请使用「全部标记」+ 手工编辑，或改为文本模式替换（演示简化）");
         }
       },
       buttons: [{ label: "关闭", action: () => { } }]
@@ -1197,12 +1187,12 @@
         const feats = [
           "多标签文本 / Hex 只读 / 大文件只读",
           "编码识别与转码(写)",
-          "查找替换 / 正则 / 标记 / 书签",
+          "查找（含跨文档）/ 正则 / 标记 / 书签",
           "行操作 / 大小写 / 空白",
           "15 套主题（编辑区 + 界面配色一体）",
           "会话恢复",
           "MD5/SHA、XML/JSON 格式化",
-          "列块编辑、Markdown 预览、插件（JS 脚本）"
+          "列块编辑、插件（JS 脚本）"
         ];
         feats.forEach(t => b.appendChild(el("div", { class: "about-li", text: t })));
 

@@ -653,7 +653,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(clickableByText(um3, "查找所有打开文件"), "跨文档查找在 Hex 视图下仍可用");
       // 统一入口：Hex 视图下 Ctrl+F 仍能打开对话框（只是当前文件作用域不可用）
       assert(SN.shortcuts.available("find.open", hexDoc) && SN.shortcuts.available("find.openDocs", hexDoc), "查找对话框在 Hex 视图也可用");
-      assert(!SN.shortcuts.available("find.replace", hexDoc) && !SN.shortcuts.available("find.next", hexDoc), "替换与步进查找在 Hex 视图不可用");
+      assert(!SN.shortcuts.available("find.next", hexDoc), "步进查找在 Hex 视图不可用");
+      // 替换能力整体移除：快捷键表、能力表、菜单、工具栏都不应再有它
+      assert(SN.shortcuts.items().every(it => it.id !== "find.replace"), "快捷键表里不再有替换项");
+      assert(SN.caps.NAMES.replace === undefined && !SN.caps.can("replace", { kind: "text" }), "能力表里不再有替换能力");
       const hexTexts = [];
       walkNodes(um3, n => { if (n.textContent) hexTexts.push(n.textContent); });
       assert(hexTexts.join("|").indexOf("仍可查找其它打开的文档") >= 0, "Hex 下说明可查其它文档");
@@ -738,7 +741,7 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
       const allText = texts.join("|");
       assert(allText.indexOf("Ctrl+S（大文本只读视图不支持保存/另存为）") >= 0, "一览标注不可用的 Ctrl+S");
-      assert(allText.indexOf("Ctrl+H（大文本只读视图不支持替换）") >= 0, "一览标注不可用的 Ctrl+H");
+      assert(allText.indexOf("Ctrl+H") < 0 && allText.indexOf("替换") < 0, "快捷键一览里已无替换（Ctrl+H）");
       assert(allText.indexOf("Ctrl+F（") < 0, "可用的 Ctrl+F 不加标注");
       SN.closeModal();
 
@@ -852,10 +855,12 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(indexHtml.indexOf("js/iconui.js") >= 0 && indexHtml.indexOf("js/iconui.js") < indexHtml.indexOf("js/app.js"),
         "index.html 里 js/iconui.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
       const tbAll = byClass(documentStub.querySelector("#toolbar"), "iconbt");
-      assert(tbAll.length >= 19, "工具栏按钮数量，实际=" + tbAll.length);
+      // 18 个：替换按钮随替换功能一起移除
+      assert(tbAll.length >= 18, "工具栏按钮数量，实际=" + tbAll.length);
       const wantIcons = ["new", "open", "save", "saveall", "close", "closeall", "cut", "copy", "paste",
-        "undo", "redo", "find", "replace", "mark", "clearmark", "zoomin", "zoomout", "wrap", "blank"];
+        "undo", "redo", "find", "mark", "clearmark", "zoomin", "zoomout", "wrap", "blank"];
       wantIcons.forEach(k => assert(SN.uiIcons.has(k), "内置图标含 " + k));
+      assert(!SN.uiIcons.has("replace"), "图标集里不再保留替换图标");
       const svgNew = SN.uiIcons.get("new");
       assert(svgNew.indexOf("<svg") === 0 && svgNew.indexOf("<path") > 0, "图标返回完整 svg 字符串");
       assert(svgNew.indexOf('stroke="currentColor"') > 0, "图标用 currentColor，跟随主题不写死颜色");

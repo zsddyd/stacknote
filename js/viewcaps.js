@@ -16,7 +16,6 @@
     exportBytes: "导出原始字节",
     find: "查找",
     findStep: "查找下一个/上一个（需要光标定位）",
-    replace: "替换",
     mark: "标记高亮",
     bookmark: "书签",
     gotoLine: "跳转行",
@@ -36,7 +35,7 @@
   const MATRIX = {
     text: {
       label: "文本编辑",
-      caps: ["edit", "undo", "clipboard", "save", "exportBytes", "find", "findStep", "replace", "mark", "bookmark",
+      caps: ["edit", "undo", "clipboard", "save", "exportBytes", "find", "findStep", "mark", "bookmark",
         "gotoLine", "columnEdit", "format", "plugin", "zoom", "view", "lang", "encoding", "eolSwitch",
         "hashSelection", "statusPos", "rename", "reloadAsText"]
     },
@@ -71,7 +70,7 @@
   const DISPLAY = [
     ["edit", "文本操作"], ["undo", "撤销/重做"], ["clipboard", "剪切/复制/粘贴"],
     ["save", "保存/另存为"], ["exportBytes", "导出原始字节"],
-    ["find", "查找（含跨文档）"], ["findStep", "查找下一个/上一个"], ["replace", "替换"],
+    ["find", "查找（含跨文档）"], ["findStep", "查找下一个/上一个"],
     ["mark", "标记高亮"], ["bookmark", "书签"], ["gotoLine", "跳转行"],
     ["columnEdit", "列块编辑"], ["format", "格式化"], ["plugin", "插件"],
     ["zoom", "缩放"], ["view", "换行/空白/行尾开关"], ["lang", "语言与语法高亮"],
