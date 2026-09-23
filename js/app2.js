@@ -237,11 +237,6 @@
   };
 
   // ============ 编码 ============
-  function bytesFor(doc) {
-    if (doc.raw && doc.raw.length) return doc.raw;
-    if (doc.handle) return doc.handle.getFile().then(f => SN.readAsBytes(f));
-    return null;
-  }
   cmd.reloadWith = async function (code) {
     const d = SN.activeDoc();
     if (!d) return;
@@ -524,7 +519,7 @@
   // 统一查找入口：不再区分「查找…」与「在打开的文档中查找…」，
   // 都在同一个对话框里输入关键字，再用两个按钮选择作用域：
   //   当前文件中查找 / 查找所有打开文件
-  // opts: { scope: "doc"(默认) | "docs", replace: true 表示从「替换…」进入 }
+  // opts: { scope: "doc"(默认) | "docs" }
   dlg.find = function (opts) {
     const o = typeof opts === "string" ? { scope: opts === "opendocs" ? "docs" : "doc" } : (opts || {});
     const ed = SN.activeEditor();
@@ -533,7 +528,7 @@
     const canFindHere = !!d && SN.caps.can("find", d);
     if (ed && !app.findOpt.keyword && ed.hasSelection()) app.findOpt.keyword = ed.selectedText().slice(0, 200);
     const m = SN.openModal({
-      title: o.replace ? "查找 / 替换" : "查找",
+      title: "查找",
       width: "560px",
       onOpen(body) {
         const rows = [];
@@ -558,7 +553,6 @@
           mk(subBtns, "查找下一个", () => doFindNext(true));
           mk(subBtns, "查找上一个", () => doFindNext(false));
           mk(subBtns, "全部标记", () => { collectOpts(); cmd.markKeyword(); });
-          mk(subBtns, "替换全部", () => doReplaceAll());
         }
         body.appendChild(fieldset("", rows, scopeBtns));
         if (subBtns.children.length) body.appendChild(el("div", { class: "findrow", style: "margin-top:6px" }, [subBtns]));
@@ -654,17 +648,7 @@
           }
           setMsg("共找到 " + res.length + " 处（查找范围：" + (sc === "docs" ? "所有打开文件" : "当前文件") + "）");
         }
-        function doReplaceAll() {
-          collectOpts();
-          if (app.findOpt.regex && app.findOpt.keyword) {
-            const re = new RegExp(app.findOpt.keyword, app.findOpt.case ? "g" : "gi");
-            mutateDocText(v => v.replace(re, ""));
-            setMsg("正则替换：以空串替换（演示）");
-          }
-          setMsg("请使用「全部标记」+ 手工编辑，或改为文本模式替换（演示简化）");
-        }
       },
-      buttons: [{ label: "关闭", action: () => { } }]
     });
     return m;
   };
@@ -840,7 +824,7 @@
   function buildHexView(doc) {
     const page = el("div", { class: "hexviewer", style: "display:flex;flex-direction:column;height:100%" });
     const bar = el("div", { class: "dockhead", style: "flex:0 0 auto" });
-    const info = el("span", { text: doc.name + " — " + SN.fmtSize(doc.raw ? doc.raw.length : doc.size || 0) + "（只读，每页 64 行 × 16 字节）" });
+    const info = el("span", { text: doc.name + "：" + SN.fmtSize(doc.raw ? doc.raw.length : doc.size || 0) + "（只读，每页 64 行 × 16 字节）" });
     const tools = el("span", {});
     const prevB = el("button", { text: "上一页" });
     const nextB = el("button", { text: "下一页" });
@@ -876,7 +860,7 @@
         html += "\n";
       }
       out.innerHTML = html;
-      info.textContent = doc.name + " — 偏移 0x" + start.toString(16) + " / 0x" + total.toString(16);
+      info.textContent = doc.name + "：偏移 0x" + start.toString(16) + " / 0x" + total.toString(16);
       prevB.disabled = start <= 0;
       nextB.disabled = start + doc.hexPageSize >= total;
     }
@@ -986,7 +970,6 @@
       buttons: [
         { label: "选择文件…", action: () => $("#hashFile").click() },
         { label: "计算选中文本", primary: true, disabled: !!selWhy, title: selWhy, action: () => calc("sel") },
-        { label: "关闭", action: () => { } }
       ],
       onOpen(b) {
         const algo = el("select", { id: "hashAlgo" });
@@ -1036,7 +1019,7 @@
         });
         setMsg("已将 " + n + " 个文档标记为 " + SN.codeById(code).name);
         SN.updateStatusLabel();
-      } }, { label: "关闭", action: () => { } }],
+      } }],
       onOpen(b) {
         const sel = el("select", { id: "batchCode" });
         SN.CODES.filter(c => c.writable).forEach(c => sel.appendChild(el("option", { value: c.id, text: c.name })));
@@ -1099,7 +1082,7 @@
     SN.openModal({
       title: "插件管理器",
       width: "680px",
-      buttons: [{ label: "添加用户插件…", action: () => addUserPlugin() }, { label: "关闭", action: () => { } }],
+      buttons: [{ label: "添加用户插件…", action: () => addUserPlugin() }],
       onOpen(b) {
         const tbl = el("table", { class: "tbl" });
         const tr0 = el("tr");
@@ -1108,7 +1091,7 @@
         for (const p of pluginList()) {
           const tr = el("tr");
           tr.appendChild(el("td", { text: p.name }));
-          tr.appendChild(el("td", { text: p.desc || "—" }));
+          tr.appendChild(el("td", { text: p.desc || "-" }));
           tr.appendChild(el("td", { text: p.insert ? "插入" : "变换" }));
           const td = el("td");
           const runBt = el("button", { text: "运行" });
@@ -1180,11 +1163,13 @@
       }
     });
   };
+  // 关于对话框里展示的仓库与联系方式（两行，排在「功能特性」之前）
+  const ABOUT_REPO = "https://github.com/zsddyd/stacknote";
+  const ABOUT_MAIL = "stacknote@zsddyd.com";
   dlg.about = function () {
     SN.openModal({
       title: "关于 StackNote",
       width: "580px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         const ver = window.SN_VERSION || "dev";
         const head = el("div", { class: "about-head" });
@@ -1193,16 +1178,25 @@
         b.appendChild(head);
         b.appendChild(el("div", { class: "about-desc", text: "零依赖、零构建的纯前端多标签文本编辑器。" }));
 
+        const repoLine = el("div", { class: "about-meta" });
+        repoLine.appendChild(el("span", { text: "仓库地址：" }));
+        repoLine.appendChild(el("a", { href: ABOUT_REPO, target: "_blank", rel: "noopener noreferrer", text: ABOUT_REPO }));
+        b.appendChild(repoLine);
+        const mailLine = el("div", { class: "about-meta" });
+        mailLine.appendChild(el("span", { text: "联系我们：" }));
+        mailLine.appendChild(el("a", { href: "mailto:" + ABOUT_MAIL, text: ABOUT_MAIL }));
+        b.appendChild(mailLine);
+
         b.appendChild(el("div", { class: "about-sec", text: "功能特性" }));
         const feats = [
           "多标签文本 / Hex 只读 / 大文件只读",
           "编码识别与转码(写)",
-          "查找替换 / 正则 / 标记 / 书签",
+          "查找（含跨文档）/ 正则 / 标记 / 书签",
           "行操作 / 大小写 / 空白",
           "15 套主题（编辑区 + 界面配色一体）",
           "会话恢复",
           "MD5/SHA、XML/JSON 格式化",
-          "列块编辑、Markdown 预览、插件（JS 脚本）"
+          "列块编辑、插件（JS 脚本）"
         ];
         feats.forEach(t => b.appendChild(el("div", { class: "about-li", text: t })));
 
@@ -1221,7 +1215,6 @@
     SN.openModal({
       title: "视图能力表",
       width: "560px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         b.appendChild(el("div", { class: "hint", text: "三种视图支持哪些功能（只读展示）。菜单、工具栏与快捷键按本表置灰；当前视图：" + SN.caps.label(SN.activeDoc()) }));
         const tbl = el("table", { class: "tbl captbl" });
@@ -1234,12 +1227,12 @@
           tr.appendChild(el("td", { text: name }));
           kinds.forEach(k => tr.appendChild(el("td", {
             class: "capcell" + (SN.caps.can(cap, { kind: k }) ? " yes" : " no"),
-            text: SN.caps.can(cap, { kind: k }) ? "✓" : "—"
+            text: SN.caps.can(cap, { kind: k }) ? "✓" : "×"
           })));
           tbl.appendChild(tr);
         });
         b.appendChild(tbl);
-        b.appendChild(el("div", { class: "hint", text: "✓ 支持　— 不支持　（定义见 js/viewcaps.js）" }));
+        b.appendChild(el("div", { class: "hint", text: "✓ 支持　× 不支持　（定义见 js/viewcaps.js）" }));
       }
     });
   };
@@ -1305,7 +1298,6 @@ SN.openModal({
     SN.openModal({
       title: "主题与语法样式（预览切换）",
       width: "700px",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         const grid = el("div", { style: "display:grid;grid-template-columns:repeat(3,1fr);gap:6px" });
         for (const t of SN.EDITOR_THEMES) {
@@ -1329,7 +1321,6 @@ SN.openModal({
   dlg.shortcuts = function () {
     SN.openModal({
       title: "快捷键一览",
-      buttons: [{ label: "关闭", action: () => { } }],
       onOpen(b) {
         // 直接渲染统一快捷键表：与菜单提示、实际按键响应同源，改键后此处自动跟随
         SN.shortcuts.groups().forEach(g => {
@@ -1344,12 +1335,12 @@ SN.openModal({
             tr.appendChild(el("td", { text: it.label }));
             // 标出当前视图下不可用的键（能力来自 js/viewcaps.js），与菜单置灰同一判据
             const why = SN.shortcuts.blockedReason(it, SN.activeDoc());
-            tr.appendChild(el("td", { text: (it.accel || "—") + (why ? "（" + why + "）" : "") }));
+            tr.appendChild(el("td", { text: (it.accel || "-") + (why ? "（" + why + "）" : "") }));
             tbl.appendChild(tr);
           });
           b.appendChild(tbl);
         });
-        b.appendChild(el("div", { class: "hint", text: "本表来自 js/shortcuts.js：菜单右侧提示、实际按键响应与此处一览同源，改键后三处一起变。撤销/重做在文本域内也按本表判定；剪切/复制/粘贴/全选为浏览器原生行为；缩放用工具栏 ＋/－；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
+        b.appendChild(el("div", { class: "hint", text: "本表来自 js/shortcuts.js：菜单右侧提示、实际按键响应与此处一览同源，改键后三处一起变。撤销/重做在文本域内也按本表判定；剪切/复制/粘贴/全选为浏览器原生行为；缩放用工具栏的放大/缩小按钮；自动缩进等编辑细节由浏览器文本域原生行为承担。" }));
       }
     });
   };

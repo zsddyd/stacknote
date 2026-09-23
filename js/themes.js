@@ -7,16 +7,18 @@
   //   accent                                    —— 强调色（选中标签顶条等）
   //   界面变量一律由 chromeOf() 按底色/前景/accent 推导：所有主题共用一套推导逻辑
   const EDITOR_THEMES = [
-    { id: "default",      name: "Default",            light: true,  bg: "#FFFFFF", fg: "#000000", accent: "#FAAA3C", font: "Courier New 14" },
-    { id: "blue_light",   name: "Blue light",         light: true,  bg: "#EAF7FF", fg: "#000000", accent: "#2F80ED", font: "Courier New 14" },
-    { id: "lavender",     name: "lavender",           light: true,  bg: "#FFF0F5", fg: "#000000", accent: "#B57EDC", font: "Courier New 14" },
-    { id: "misty_rose",   name: "misty rose",         light: true,  bg: "#FFE4E1", fg: "#000000", accent: "#D98098", font: "Courier New 14" },
-    { id: "yellow_rice",  name: "yellow rice",        light: true,  bg: "#F6F3EA", fg: "#000000", accent: "#C08A2E", font: "Courier New 14" },
+    // 浅色主题的正文色统一用近黑 #111214，不用纯黑（纯黑在 LCD 上过锐，也是"AI 味"清单里明令禁止的值）
+    { id: "default",      name: "Default",            light: true,  bg: "#FFFFFF", fg: "#111214", accent: "#FAAA3C", font: "Courier New 14" },
+    { id: "blue_light",   name: "Blue light",         light: true,  bg: "#EAF7FF", fg: "#111214", accent: "#2F80ED", font: "Courier New 14" },
+    { id: "lavender",     name: "lavender",           light: true,  bg: "#FFF0F5", fg: "#111214", accent: "#B57EDC", font: "Courier New 14" },
+    { id: "misty_rose",   name: "misty rose",         light: true,  bg: "#FFE4E1", fg: "#111214", accent: "#D98098", font: "Courier New 14" },
+    { id: "yellow_rice",  name: "yellow rice",        light: true,  bg: "#F6F3EA", fg: "#111214", accent: "#C08A2E", font: "Courier New 14" },
     { id: "bespin",       name: "Bespin",             light: false, bg: "#2A211C", fg: "#BDAE9D", accent: "#FCAF3E", font: "Courier New 14" },
     { id: "black_board",  name: "Black board",        light: false, bg: "#0C1021", fg: "#F8F8F8", accent: "#8080C0", font: "Courier New 14" },
     { id: "choco",        name: "Choco",              light: false, bg: "#1A0F0B", fg: "#C3BE98", accent: "#FCAF3E", font: "Courier New 14" },
     { id: "danslerush",   name: "DansLeRuSH-Dark",    light: false, bg: "#2E2E2E", fg: "#C7C7C7", accent: "#C7C7C7", font: "Courier New 14" },
-    { id: "deep_black",   name: "Deep Black",         light: false, bg: "#000000", fg: "#FFFFFF", accent: "#58A6FF", font: "Courier New 13" },
+    // Deep Black 保留"近黑"而不是纯黑：观感几乎一致，但避开纯黑值
+    { id: "deep_black",   name: "Deep Black",         light: false, bg: "#050506", fg: "#FFFFFF", accent: "#58A6FF", font: "Courier New 13" },
     { id: "hot_fudge",    name: "HotFudgeSundae",     light: false, bg: "#2B0F01", fg: "#B7975D", accent: "#D9A05B", font: "Consolas 14" },
     { id: "mono_ind",     name: "Mono Industrial",    light: false, bg: "#222C28", fg: "#FFFFFF", accent: "#7FBFA0", font: "Courier New 14" },
     { id: "monokai",      name: "Monokai",            light: false, bg: "#272822", fg: "#F8F8F2", accent: "#A6E22E", font: "Courier New 14" },
@@ -54,8 +56,10 @@
       "--btn-bg": mixHex(bg, light ? 0.12 : 0.10, toward),
       "--btn-hover-a": light ? mixHex(bg, 0.03, "#FFFFFF") : mixHex(bg, 0.16, "#FFFFFF"),
       "--btn-hover-b": light ? mixHex(bg, 0.12, "#000000") : mixHex(bg, 0.07, "#FFFFFF"),
-      // 选中/高亮底色要压得住白字：亮色系往暗里压，深色系把 accent 掺进底色
-      "--selection": light ? mixHex(accent, 0.30, "#000000") : mixHex(bg, 0.28, accent),
+      // 选中/高亮底色要压得住白字：亮色系往暗里压，深色系把 accent 掺进底色。
+      // 亮色系的压暗比例取 0.45：默认主题（橙 #FAAA3C）上白字能到 ≈5.7:1，满足 WCAG AA 4.5:1
+      // （0.30 时只有 3.8:1，不达标）
+      "--selection": light ? mixHex(accent, 0.45, "#000000") : mixHex(bg, 0.28, accent),
       "--panel": mixHex(bg, light ? 0.07 : 0.06, toward),
       "--panel2": light ? bg : mixHex(bg, 0.03, toward),
       "--text": fg,

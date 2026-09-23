@@ -34,14 +34,6 @@
 
   function uid() { return "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
-  function debounce(fn, ms) {
-    let t = null;
-    const g = function () { const a = arguments, s = this; clearTimeout(t); t = setTimeout(() => fn.apply(s, a), ms); };
-    g.cancel = () => clearTimeout(t);
-    return g;
-  }
-
-  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
   function fmtSize(n) {
     if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
     if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
@@ -61,45 +53,11 @@
     return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
   }
 
-  function splitLinesKeep(text) {
-    // 按行拆分，保留行内容(不含换行)，返回 {lines, ends}
-    const lines = [], ends = [];
-    let cur = "", i = 0;
-    while (i < text.length) {
-      const ch = text[i];
-      if (ch === "\r") {
-        if (text[i + 1] === "\n") { ends.push("crlf"); lines.push(cur); cur = ""; i += 2; }
-        else { ends.push("cr"); lines.push(cur); cur = ""; i += 1; }
-      } else if (ch === "\n") { ends.push("lf"); lines.push(cur); cur = ""; i += 1; }
-      else { cur += ch; i += 1; }
-    }
-    lines.push(cur);
-    return { lines, ends };
-  }
-
   function countLines(text) {
     if (!text) return 1;
     let n = 1;
     for (let i = 0; i < text.length; i++) if (text[i] === "\n") n++;
     return n;
-  }
-
-  function lineAt(text, target) { // target 为 0 基行号
-    let start = 0, line = 0;
-    while (line < target) {
-      const nl = text.indexOf("\n", start);
-      if (nl < 0) break;
-      start = nl + 1; line++;
-    }
-    return start;
-  }
-
-  function positionToLineCol(text, pos) {
-    let line = 0, last = -1, i = 0;
-    for (; i < pos && i < text.length; i++) {
-      if (text[i] === "\n") { line++; last = i; }
-    }
-    return { line, col: pos - (last + 1) };
   }
 
   function readAsBytes(file) {
@@ -110,8 +68,6 @@
       fr.readAsArrayBuffer(file);
     });
   }
-
-  function readAsTextBytes(file) { return readAsBytes(file); }
 
   function download(filename, blob) {
     const a = document.createElement("a");
@@ -128,10 +84,9 @@
   function emit(name, detail) { bus.dispatchEvent(new CustomEvent(name, { detail })); }
 
   SN.$ = $; SN.$$ = $$; SN.el = el; SN.escapeHtml = escapeHtml;
-  SN.uid = uid; SN.debounce = debounce; SN.clamp = clamp;
-  SN.fmtSize = fmtSize; SN.splitLinesKeep = splitLinesKeep; SN.uuid = uuid;
-  SN.countLines = countLines; SN.lineAt = lineAt; SN.positionToLineCol = positionToLineCol;
-  SN.readAsBytes = readAsBytes; SN.readAsTextBytes = readAsTextBytes; SN.download = download;
+  SN.uid = uid; SN.uuid = uuid;
+  SN.fmtSize = fmtSize; SN.countLines = countLines;
+  SN.readAsBytes = readAsBytes; SN.download = download;
   SN.on = on; SN.off = off; SN.emit = emit;
   SN.toast = function (msg, ms) {
     const box = SN.$("#toasts");

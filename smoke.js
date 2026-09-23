@@ -128,7 +128,7 @@ const files = [
   "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
-  "js/textops.js", "js/menu.js", "js/app.js", "js/app2.js"
+  "js/textops.js", "js/menu.js", "js/iconui.js", "js/app.js", "js/app2.js"
 ];
 for (const f of files) {
   const code = fs.readFileSync(path.join(__dirname, f), "utf8");
@@ -335,7 +335,8 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
   assert(st["--ed-line-num"] === "#6a6a6a" && st["--tok-key"] === "#66D9EF", "未带覆盖的主题仍按默认推导并回落到 Monokai 色盘");
   assert(st["--panel"] !== "#282C34" && st["--accent"] === "#A6E22E", "换成 Monokai 后界面变量跟着换");
   SN.applyEditorTheme("default");
-  assert(st["--ed-bg"] === "#FFFFFF" && st["--text"] === "#000000" && st["--panel"] === "#ededed", "Default 是浅色主题：界面也随之回到浅色");
+  // 正文色是近黑 #111214（不用纯黑：纯黑在浅底上过锐，见界面配色不变量一节）
+  assert(st["--ed-bg"] === "#FFFFFF" && st["--text"] === "#111214" && st["--panel"] === "#ededed", "Default 是浅色主题：界面也随之回到浅色");
 }
 // 每套主题都要给全界面变量，不能有漏项（漏项会退回 :root 的浅色兜底，深色主题就会出现花屏）
 {
@@ -383,6 +384,19 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     SN.cmd.convertTo("utf8bom");
     assert(d0.enc === "utf8bom", "convertTo");
     SN.dlg.about();
+    // 关于对话框：仓库地址与联系方式两行，且排在「功能特性」之前
+    {
+      const aboutTexts = [];
+      walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) aboutTexts.push(n.textContent); });
+      const aboutText = aboutTexts.join("|");
+      assert(aboutText.indexOf("仓库地址：") >= 0 && aboutText.indexOf("https://github.com/zsddyd/stacknote") >= 0,
+        "关于里给出仓库地址");
+      assert(aboutText.indexOf("联系我们：") >= 0 && aboutText.indexOf("stacknote@zsddyd.com") >= 0,
+        "关于里给出联系方式");
+      assert(aboutText.indexOf("仓库地址：") < aboutText.indexOf("功能特性") &&
+        aboutText.indexOf("联系我们：") < aboutText.indexOf("功能特性"),
+        "仓库与联系方式两行排在「功能特性」之前");
+    }
     SN.closeModal();
     // 「主题与语法样式」点卡片要真正落盘（曾只改预览：themes.js 写 SN.settings，保存读 app.settings）
     const odpPanel = SN.chromeOf(SN.getTheme("onedarkpro"))["--panel"];
@@ -652,7 +666,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(clickableByText(um3, "查找所有打开文件"), "跨文档查找在 Hex 视图下仍可用");
       // 统一入口：Hex 视图下 Ctrl+F 仍能打开对话框（只是当前文件作用域不可用）
       assert(SN.shortcuts.available("find.open", hexDoc) && SN.shortcuts.available("find.openDocs", hexDoc), "查找对话框在 Hex 视图也可用");
-      assert(!SN.shortcuts.available("find.replace", hexDoc) && !SN.shortcuts.available("find.next", hexDoc), "替换与步进查找在 Hex 视图不可用");
+      assert(!SN.shortcuts.available("find.next", hexDoc), "步进查找在 Hex 视图不可用");
+      // 替换能力整体移除：快捷键表、能力表、菜单、工具栏都不应再有它
+      assert(SN.shortcuts.items().every(it => it.id !== "find.replace"), "快捷键表里不再有替换项");
+      assert(SN.caps.NAMES.replace === undefined && !SN.caps.can("replace", { kind: "text" }), "能力表里不再有替换能力");
       const hexTexts = [];
       walkNodes(um3, n => { if (n.textContent) hexTexts.push(n.textContent); });
       assert(hexTexts.join("|").indexOf("仍可查找其它打开的文档") >= 0, "Hex 下说明可查其它文档");
@@ -737,7 +754,7 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       walkNodes(documentStub.querySelector("#modalHost"), n => { if (n.textContent) texts.push(n.textContent); });
       const allText = texts.join("|");
       assert(allText.indexOf("Ctrl+S（大文本只读视图不支持保存/另存为）") >= 0, "一览标注不可用的 Ctrl+S");
-      assert(allText.indexOf("Ctrl+H（大文本只读视图不支持替换）") >= 0, "一览标注不可用的 Ctrl+H");
+      assert(allText.indexOf("Ctrl+H") < 0 && allText.indexOf("替换") < 0, "快捷键一览里已无替换（Ctrl+H）");
       assert(allText.indexOf("Ctrl+F（") < 0, "可用的 Ctrl+F 不加标注");
       SN.closeModal();
 
@@ -751,7 +768,9 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(capAll.indexOf("视图能力表") >= 0, "能力表对话框已打开");
       assert(capAll.indexOf("文本编辑") >= 0 && capAll.indexOf("大文本只读") >= 0 && capAll.indexOf("Hex 只读") >= 0, "三种视图列都在");
       assert(capAll.indexOf("（当前）") >= 0, "标出当前视图列");
-      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("—") >= 0, "支持/不支持都有展示");
+      // 支持用 ✓、不支持用 ×（不再用破折号当占位符：破折号在界面文案里一律不用）
+      assert(capAll.indexOf("✓") >= 0 && capAll.indexOf("×") >= 0, "支持/不支持都有展示");
+      assert(capAll.indexOf("—") < 0, "能力表里不再出现破折号占位符");
       assert(capCells.length === SN.caps.DISPLAY.length * 3, "每项能力三列都有单元格，实际=" + capCells.length);
       SN.closeModal();
 
@@ -843,6 +862,87 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     assert(indexHtml.indexOf("js/menu.js") >= 0 && indexHtml.indexOf("js/menu.js") < indexHtml.indexOf("js/app.js"),
       "index.html 里 js/menu.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
     assert(/id="ctxmenu"[^>]*role="menu"/.test(indexHtml), "#ctxmenu 声明 role=menu（右键菜单容器语义）");
+
+    // 界面图标：内联 SVG（js/iconui.js），零依赖、跟随主题色、线宽统一，工具栏不再用 emoji 字形
+    {
+      assert(indexHtml.indexOf("js/iconui.js") >= 0 && indexHtml.indexOf("js/iconui.js") < indexHtml.indexOf("js/app.js"),
+        "index.html 里 js/iconui.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
+      const tbAll = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      // 18 个：替换按钮随替换功能一起移除
+      assert(tbAll.length >= 18, "工具栏按钮数量，实际=" + tbAll.length);
+      const wantIcons = ["new", "open", "save", "saveall", "close", "closeall", "cut", "copy", "paste",
+        "undo", "redo", "find", "mark", "clearmark", "zoomin", "zoomout", "wrap", "blank"];
+      wantIcons.forEach(k => assert(SN.uiIcons.has(k), "内置图标含 " + k));
+      assert(!SN.uiIcons.has("replace"), "图标集里不再保留替换图标");
+      const svgNew = SN.uiIcons.get("new");
+      assert(svgNew.indexOf("<svg") === 0 && svgNew.indexOf("<path") > 0, "图标返回完整 svg 字符串");
+      assert(svgNew.indexOf('stroke="currentColor"') > 0, "图标用 currentColor，跟随主题不写死颜色");
+      assert(SN.uiIcons.get("__不存在__") === "", "未知图标返回空串，调用方据此回退");
+      // 线宽统一：同一套图标只有一种 stroke-width
+      const widths = Array.from(new Set(SN.uiIcons.names().map(k => (SN.uiIcons.get(k).match(/stroke-width="([^"]+)"/) || [])[1])));
+      assert(widths.length === 1 && widths[0] === "1.5", "所有图标共用同一 stroke-width，实际=" + widths.join(","));
+      // path 数据合法性：只含 SVG 路径指令与数字
+      SN.uiIcons.names().forEach(k => {
+        const ds = SN.uiIcons.PATHS[k];
+        assert(Array.isArray(ds) && ds.length > 0, k + " 至少有 1 条 path");
+        assert(ds.every(d => /^[MmLlHhVvCcSsQqTtAaZz0-9.,\- ]+$/.test(d)), k + " 的 path 数据只含合法指令");
+      });
+      // 工具栏确实渲染成 SVG，且不再写 emoji 字形（emoji 仅作为模块缺失时的兜底）
+      const withSvg = tbAll.filter(b => String(b.innerHTML || "").indexOf("<svg") >= 0).length;
+      assert(withSvg === tbAll.length, "每个工具栏按钮都渲染 SVG，实际 " + withSvg + "/" + tbAll.length);
+      assert(tbAll.every(b => !b.textContent), "工具栏不再写 emoji 字形（textContent 为空）");
+      const emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u;
+      assert(!emojiRe.test(tbAll.map(b => String(b.innerHTML || "") + String(b.textContent || "")).join("")),
+        "工具栏按钮里不残留 emoji / 箭头字形");
+    }
+
+    // 界面配色不变量（无障碍 / 反"AI 味"清单）：不用纯黑、阴影带底色、选中底色对白字达 WCAG AA
+    {
+      const themesSrc = fs.readFileSync(path.join(__dirname, "js/themes.js"), "utf8");
+      const cssSrc = fs.readFileSync(path.join(__dirname, "css/sn.css"), "utf8");
+      // ① 主题的 bg/fg 不得使用纯黑（纯黑在浅底上过锐，也是明令禁止的取值）
+      const themeColors = themesSrc.match(/(?:bg|fg):\s*"#[0-9A-Fa-f]{6}"/g) || [];
+      const pureBlack = themeColors.filter(s => /#000000/i.test(s));
+      assert(pureBlack.length === 0, "主题 bg/fg 不使用纯黑，实际命中=" + pureBlack.join(","));
+      // ② CSS 里不再有纯黑实色或纯黑投影（投影要带底色）
+      assert(cssSrc.indexOf("#000000") < 0, "css/sn.css 不再出现 #000000");
+      assert(cssSrc.indexOf("rgba(0,0,0") < 0, "css/sn.css 不再出现纯黑半透明（阴影需带底色）");
+      assert(/box-shadow:[^;]*rgba\(\s*38\s*,\s*40\s*,\s*44/.test(cssSrc), "投影使用带底色的 rgba(38,40,44,…)");
+      // ③ 选中底色 + 白字达到 WCAG AA 4.5:1（白字用在工具栏激活态/菜单 hover/结果命中上）
+      const toRgb = (hex) => {
+        const h = String(hex).trim();
+        const m = /^#([0-9a-f]{6})$/i.exec(h);
+        if (!m) return null;
+        return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16) / 255);
+      };
+      const relLum = (hex) => {
+        const c = toRgb(hex);
+        if (!c) return null;
+        const f = c.map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+        return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+      };
+      const contrast = (a, b) => {
+        const la = relLum(a), lb = relLum(b);
+        if (la == null || lb == null) return null;
+        const hi = Math.max(la, lb), lo = Math.min(la, lb);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const ids = (themesSrc.match(/id:\s*"([a-z_0-9]+)"/g) || []).map(s => s.split('"')[1]);
+      assert(ids.length >= 15, "主题数量，实际=" + ids.length);
+      const bad = [];
+      ids.forEach(id => {
+        const vars = SN.chromeOf(SN.getTheme(id));
+        const r = contrast(vars["--selection"], "#FFFFFF");
+        if (r == null || r < 4.5) bad.push(id + "=" + (r == null ? "解析失败" : r.toFixed(2)));
+      });
+      assert(bad.length === 0, "每套主题的选中底色 + 白字都达到 WCAG AA 4.5:1，未达标=" + bad.join(","));
+      // ④ 圆角刻度统一（0/2/3/4 四档）且有文档说明；不再出现刻度外的取值
+      assert(cssSrc.indexOf("圆角刻度") >= 0, "css/sn.css 写明了圆角刻度来源");
+      assert(cssSrc.indexOf("border-radius:1px") < 0, "圆角不再出现刻度外的 1px");
+      // ⑤ 触觉反馈 + 减少动态效果的兜底
+      assert(cssSrc.indexOf("button:active") >= 0, "按钮有按下反馈（:active）");
+      assert(cssSrc.indexOf("prefers-reduced-motion") >= 0, "有 prefers-reduced-motion 兜底");
+    }
 
     // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染
     const d0 = SN.app.docs.filter(d => d.editor)[0];

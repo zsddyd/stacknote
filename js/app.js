@@ -228,7 +228,6 @@
   function findMenuItems() {
     return [
       { label: "查找…", sc: "find.open" },
-      { label: "替换…", sc: "find.replace", requires: "replace" },
       { label: "查找下一个", sc: "find.next", requires: "findStep" },
       { label: "查找上一个", sc: "find.prev", requires: "findStep" },
       "-",
@@ -340,7 +339,6 @@
     redo: { t: "重做", g: "↻", requires: "undo", a: () => edCmd("redo") },
     sep3: "-",
     find: { t: "查找", g: "🔍", a: () => dlg.find({ scope: "doc" }) },
-    replace: { t: "替换", g: "🔁", requires: "replace", a: () => dlg.find({ scope: "doc", replace: true }) },
     mark: { t: "全部标记", g: "🖍️", a: () => cmd.markAll() },
     clearmark: { t: "清除标记", g: "🧹", a: () => cmd.clearMarksAll() },
     sep4: "-",
@@ -357,10 +355,14 @@
       if (def === "-") { toolbar.appendChild(el("div", { class: "tbsep" })); continue; }
       // 同菜单：当前视图不具备所需能力时置灰并说明原因（不接点击，tooltip 仍可见）
       const why = def.requires && SN.caps ? SN.caps.reason(def.requires, activeDoc()) : "";
+      // 图标：优先用内联 SVG（js/iconui.js，Tabler 字形，跟随主题色），模块缺失时退回原来的 emoji 字形
+      const svg = SN.uiIcons ? SN.uiIcons.get(key) : "";
       const b = el("button", {
         class: "iconbt" + (def.toggle && def.toggle() ? " on" : "") + (why ? " disabled" : ""),
-        title: why ? (def.t + " — " + why) : def.t,
-        text: def.g
+        // 置灰原因跟在标题后：用全角冒号，不用破折号（破折号是 AI 味最重的排版习惯之一）
+        title: why ? (def.t + "：" + why) : def.t,
+        html: svg || null,
+        text: svg ? null : def.g
       });
       if (why) b.setAttribute("aria-disabled", "true");
       if (def.disabled) b.disabled = true;
@@ -368,13 +370,6 @@
       toolbar.appendChild(b);
     }
   }
-  function refreshToolbar() {
-    const map = { wrap: "wrap", blank: "blank" };
-    SN.$$("#toolbar .iconbt").forEach(bt => {
-      const key = bt.title && bt.title.length ? bt.title : "";
-    });
-  }
-
   // ============ 文档与标签 ============
   const tabstrip = SN.$("#tabstrip");
   const editorZone = SN.$("#editorZone");
@@ -602,10 +597,6 @@
   SN.tool = tool;
 
   // ---- 打开 / 保存 / 新建 / 关闭 ----
-  function supportedOpen() {
-    return !!(window.showOpenFilePicker || document.createElement("input").webkitdirectory !== undefined || true);
-  }
-
   cmd.open = function (mode) {
     app.pendingOpenMode = mode || "auto";
     SN.$("#fileInput").value = "";
@@ -987,7 +978,10 @@
         foot.appendChild(bn);
       }
     }
-    dlgEl.appendChild(foot);
+    // 只有真正有动作按钮时才渲染底部条：纯展示类对话框（关于/能力表/快捷键一览…）
+    // 靠右上角 ×（以及 Esc / 点遮罩）关闭，不再重复放一个"关闭"按钮，
+    // 否则右上角与右下角是同一个语义，底部还会多出一条空的分隔线
+    if (foot.children.length) dlgEl.appendChild(foot);
     mask.appendChild(dlgEl);
     mask.addEventListener("click", (e) => { if (e.target === mask) closeModal(); });
     host.appendChild(mask);
@@ -1213,9 +1207,9 @@
   // 文件/编辑子命令占位，app2 覆盖
   const placeholders = ["eolConv", "blankOp", "tabOp", "caseOp", "lineOp", "sortOp", "edStatus",
     "toggleWrap", "toggleSpaces", "toggleEol", "toggleWeb", "toggleFileDock", "toggleToolbar",
-    "toggleResultDock", "isDockVisible", "copyResultDock", "reloadWith", "convertTo", "reloadAs",
+    "toggleResultDock", "copyResultDock", "reloadWith", "convertTo", "reloadAs",
     "markAll", "clearMarksAll", "wordHighlight", "toggleBookmark", "gotoBookmark", "clearBookmarks",
-    "openDefineLang", "zoom", "setStatusbar", "refreshStatus", "showHexBytes"];
+    "openDefineLang", "zoom"];
   placeholders.forEach(n => { if (cmd[n] === undefined) cmd[n] = () => toast("该功能在演示版暂不可用：" + n); });
 
   // ============ Boot ============
@@ -1327,7 +1321,6 @@
   SN.closeModal = closeModal;
   SN.showCtx = showCtx;
   SN.addDoc = addDoc;
-  SN.openModal = openModal;
   SN.refreshMenus = refreshMenus;
   SN.saveSettings = saveSettings;
   SN.encodeDocContent = encodeDocContent;
