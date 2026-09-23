@@ -335,7 +335,8 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
   assert(st["--ed-line-num"] === "#6a6a6a" && st["--tok-key"] === "#66D9EF", "未带覆盖的主题仍按默认推导并回落到 Monokai 色盘");
   assert(st["--panel"] !== "#282C34" && st["--accent"] === "#A6E22E", "换成 Monokai 后界面变量跟着换");
   SN.applyEditorTheme("default");
-  assert(st["--ed-bg"] === "#FFFFFF" && st["--text"] === "#000000" && st["--panel"] === "#ededed", "Default 是浅色主题：界面也随之回到浅色");
+  // 正文色是近黑 #111214（不用纯黑：纯黑在浅底上过锐，见界面配色不变量一节）
+  assert(st["--ed-bg"] === "#FFFFFF" && st["--text"] === "#111214" && st["--panel"] === "#ededed", "Default 是浅色主题：界面也随之回到浅色");
 }
 // 每套主题都要给全界面变量，不能有漏项（漏项会退回 :root 的浅色兜底，深色主题就会出现花屏）
 {
@@ -875,6 +876,54 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u;
       assert(!emojiRe.test(tbAll.map(b => String(b.innerHTML || "") + String(b.textContent || "")).join("")),
         "工具栏按钮里不残留 emoji / 箭头字形");
+    }
+
+    // 界面配色不变量（无障碍 / 反"AI 味"清单）：不用纯黑、阴影带底色、选中底色对白字达 WCAG AA
+    {
+      const themesSrc = fs.readFileSync(path.join(__dirname, "js/themes.js"), "utf8");
+      const cssSrc = fs.readFileSync(path.join(__dirname, "css/sn.css"), "utf8");
+      // ① 主题的 bg/fg 不得使用纯黑（纯黑在浅底上过锐，也是明令禁止的取值）
+      const themeColors = themesSrc.match(/(?:bg|fg):\s*"#[0-9A-Fa-f]{6}"/g) || [];
+      const pureBlack = themeColors.filter(s => /#000000/i.test(s));
+      assert(pureBlack.length === 0, "主题 bg/fg 不使用纯黑，实际命中=" + pureBlack.join(","));
+      // ② CSS 里不再有纯黑实色或纯黑投影（投影要带底色）
+      assert(cssSrc.indexOf("#000000") < 0, "css/sn.css 不再出现 #000000");
+      assert(cssSrc.indexOf("rgba(0,0,0") < 0, "css/sn.css 不再出现纯黑半透明（阴影需带底色）");
+      assert(/box-shadow:[^;]*rgba\(\s*38\s*,\s*40\s*,\s*44/.test(cssSrc), "投影使用带底色的 rgba(38,40,44,…)");
+      // ③ 选中底色 + 白字达到 WCAG AA 4.5:1（白字用在工具栏激活态/菜单 hover/结果命中上）
+      const toRgb = (hex) => {
+        const h = String(hex).trim();
+        const m = /^#([0-9a-f]{6})$/i.exec(h);
+        if (!m) return null;
+        return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16) / 255);
+      };
+      const relLum = (hex) => {
+        const c = toRgb(hex);
+        if (!c) return null;
+        const f = c.map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+        return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+      };
+      const contrast = (a, b) => {
+        const la = relLum(a), lb = relLum(b);
+        if (la == null || lb == null) return null;
+        const hi = Math.max(la, lb), lo = Math.min(la, lb);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const ids = (themesSrc.match(/id:\s*"([a-z_0-9]+)"/g) || []).map(s => s.split('"')[1]);
+      assert(ids.length >= 15, "主题数量，实际=" + ids.length);
+      const bad = [];
+      ids.forEach(id => {
+        const vars = SN.chromeOf(SN.getTheme(id));
+        const r = contrast(vars["--selection"], "#FFFFFF");
+        if (r == null || r < 4.5) bad.push(id + "=" + (r == null ? "解析失败" : r.toFixed(2)));
+      });
+      assert(bad.length === 0, "每套主题的选中底色 + 白字都达到 WCAG AA 4.5:1，未达标=" + bad.join(","));
+      // ④ 圆角刻度统一（0/2/3/4 四档）且有文档说明；不再出现刻度外的取值
+      assert(cssSrc.indexOf("圆角刻度") >= 0, "css/sn.css 写明了圆角刻度来源");
+      assert(cssSrc.indexOf("border-radius:1px") < 0, "圆角不再出现刻度外的 1px");
+      // ⑤ 触觉反馈 + 减少动态效果的兜底
+      assert(cssSrc.indexOf("button:active") >= 0, "按钮有按下反馈（:active）");
+      assert(cssSrc.indexOf("prefers-reduced-motion") >= 0, "有 prefers-reduced-motion 兜底");
     }
 
     // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染

@@ -13,20 +13,27 @@
   --tab-bg:#E6E6E6; --tab-bg-active:#FFFFFF;
   --danger:#C0392B;
   /* 以下变量由 themes.js 按主题写入 <html> 内联样式；这里的值只是首屏兜底（= Default 主题） */
-  --ed-bg:#FFFFFF; --ed-fg:#000000;
+  --ed-bg:#FFFFFF; --ed-fg:#111214;
   --ed-line-num:#808080; --ed-gutter-bg:#f0f0f0;
   --ed-caret:#000;
   --ed-selection:rgba(0,204,255,.30);
-  --ed-active-line:rgba(0,0,0,.04);
+  --ed-active-line:rgba(17,18,20,.05);
   --ed-fold-fg:#888;
 }
 *{box-sizing:border-box}
+/* 圆角刻度（全局唯一来源，新增样式请对号入座，不要再引入第 5 种取值）：
+   0   无缝：菜单栏按钮、表格、编辑器与各视图
+   2   输入类与列表项：input/select/textarea、色块、文件列表项、编辑器高亮块
+   3   控件：按钮、工具栏图标按钮、菜单项与子菜单面板、toast、快捷键帽
+   4   容器：模态对话框 */
 html,body{height:100%;margin:0}
 body{font:13px/1.45 "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
      color:var(--text);background:var(--panel);overflow:hidden}
 button{font:inherit;color:inherit;background:var(--btn-bg);border:1px solid var(--border);
        border-radius:3px;padding:2px 8px;cursor:pointer}
 button:hover{background:linear-gradient(180deg,var(--btn-hover-a),var(--btn-hover-b))}
+/* 按下时 1px 下移，模拟物理按压（系统开启"减少动态效果"时在文件末尾关掉） */
+button:active{transform:translateY(1px)}
 button:disabled{opacity:.45;cursor:default}
 select,input[type=text],input[type=number],textarea{font:inherit;color:var(--text);
   background:var(--panel2);border:1px solid var(--border);border-radius:2px;padding:2px 4px}
@@ -40,13 +47,13 @@ label{user-select:none}
 .menu-root>button.menu-caption{border:0;background:none;border-radius:0;padding:3px 9px}
 .menu-root.open>button.menu-caption,.menu-root>button.menu-caption:hover{background:var(--btn-hover-a)}
 .dropdown{position:absolute;top:100%;left:0;min-width:210px;max-height:75vh;overflow:auto;
-  background:var(--panel2);border:1px solid var(--border);z-index:800;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+  background:var(--panel2);border:1px solid var(--border);z-index:800;box-shadow:0 4px 12px rgba(38,40,44,.22)}
 .menu-root>.dropdown{display:none}
 .menu-root.open>.dropdown{display:block}
 .dropdown.hidden,.submenu-pos.hidden,.hidden{display:none!important}
 .menu-pop{position:fixed;z-index:950;min-width:210px;max-width:80vw;max-height:70vh;overflow:auto;
   background:var(--panel2);border:1px solid var(--border);padding:3px;
-  box-shadow:0 6px 18px rgba(0,0,0,.28)}
+  box-shadow:0 6px 18px rgba(38,40,44,.24)}
 .mi .sw{display:inline-block;width:15px;height:12px;border:1px solid #999;border-radius:2px;vertical-align:-1px;flex:0 0 auto}
 .mi{display:flex;align-items:center;gap:8px;padding:3px 10px;cursor:pointer;white-space:nowrap}
 /* 只有「能点的条目」才给 hover 高亮：分隔线与置灰项不该看起来像可选中/可焦点 */
@@ -117,7 +124,7 @@ label{user-select:none}
 .ed-hl .c-tag{color:var(--tok-tag,#800000)}
 .ed-hl .c-attr{color:var(--tok-attr,#e50000)}
 .ed-hl .c-meta{color:var(--tok-meta,#800080)}
-.ed-hl mark{background:var(--hlw,#FFEB3B);color:inherit;border-radius:1px}
+.ed-hl mark{background:var(--hlw,#FFEB3B);color:inherit;border-radius:2px}
 .ed-hl .rowhl{background:var(--ed-active-line);display:block}
 .ed-input{position:absolute;inset:0;width:100%;height:100%;resize:none;padding:4px 6px;
   color:transparent;caret-color:var(--ed-caret);z-index:2;background:transparent;overflow:auto}
@@ -163,9 +170,9 @@ label{user-select:none}
 /* ---------- 模态 ---------- */
 #modalHost{position:fixed;inset:0;z-index:900;pointer-events:none}
 #modalHost.show{pointer-events:auto}
-.mask{position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}
+.mask{position:absolute;inset:0;background:rgba(20,22,26,.35);display:flex;align-items:center;justify-content:center}
 .dialog{background:var(--panel2);border:1px solid var(--border);border-radius:4px;
-  min-width:360px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+  min-width:360px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(38,40,44,.26)}
 .dialog .dhead{padding:8px 12px;font-weight:bold;background:var(--panel);border-bottom:1px solid var(--border);
   display:flex;justify-content:space-between;align-items:center}
 .dialog .dbody{padding:10px 12px;overflow:auto}
@@ -207,9 +214,9 @@ label{user-select:none}
 .hexviewer .hf{color:#2a7}
 #toasts{position:fixed;bottom:34px;right:10px;z-index:1000;display:flex;flex-direction:column;gap:6px}
 .toast{background:var(--panel2);border:1px solid var(--border);border-left:4px solid var(--accent);
-  padding:6px 12px;border-radius:3px;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:420px}
+  padding:6px 12px;border-radius:3px;box-shadow:0 4px 12px rgba(38,40,44,.26);max-width:420px}
 #ctxmenu{position:fixed;z-index:950;background:var(--panel2);border:1px solid var(--border);
-  box-shadow:0 6px 16px rgba(0,0,0,.3);min-width:170px;max-height:80vh;overflow:auto;padding:3px}
+  box-shadow:0 6px 16px rgba(38,40,44,.26);min-width:170px;max-height:80vh;overflow:auto;padding:3px}
 #ctxmenu .mi{padding:4px 12px}
 /* 上面的内边距不能落到分隔线上（否则它会变成一条带内边距的粗条，像可选中项） */
 #ctxmenu .mi.sep{padding:0}
@@ -235,3 +242,10 @@ label{user-select:none}
 .scroll-y{overflow:auto}
 .kbd{display:inline-block;border:1px solid var(--border);border-bottom-width:2px;border-radius:3px;padding:0 5px;font-size:11px;background:var(--panel)}
 .fullscreen .page{position:static}
+
+/* 无障碍：系统开启「减少动态效果」时去掉按下位移与任何动效
+   （当前仓库没有 transition/animation，这里作为以后新增动效的统一兜底） */
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important;animation:none !important}
+  button:active{transform:none}
+}
