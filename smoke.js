@@ -128,7 +128,7 @@ const files = [
   "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
-  "js/textops.js", "js/menu.js", "js/app.js", "js/app2.js"
+  "js/textops.js", "js/menu.js", "js/iconui.js", "js/app.js", "js/app2.js"
 ];
 for (const f of files) {
   const code = fs.readFileSync(path.join(__dirname, f), "utf8");
@@ -843,6 +843,37 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     assert(indexHtml.indexOf("js/menu.js") >= 0 && indexHtml.indexOf("js/menu.js") < indexHtml.indexOf("js/app.js"),
       "index.html 里 js/menu.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
     assert(/id="ctxmenu"[^>]*role="menu"/.test(indexHtml), "#ctxmenu 声明 role=menu（右键菜单容器语义）");
+
+    // 界面图标：内联 SVG（js/iconui.js），零依赖、跟随主题色、线宽统一，工具栏不再用 emoji 字形
+    {
+      assert(indexHtml.indexOf("js/iconui.js") >= 0 && indexHtml.indexOf("js/iconui.js") < indexHtml.indexOf("js/app.js"),
+        "index.html 里 js/iconui.js 排在 js/app.js 之前（script 顺序即依赖顺序）");
+      const tbAll = byClass(documentStub.querySelector("#toolbar"), "iconbt");
+      assert(tbAll.length >= 19, "工具栏按钮数量，实际=" + tbAll.length);
+      const wantIcons = ["new", "open", "save", "saveall", "close", "closeall", "cut", "copy", "paste",
+        "undo", "redo", "find", "replace", "mark", "clearmark", "zoomin", "zoomout", "wrap", "blank"];
+      wantIcons.forEach(k => assert(SN.uiIcons.has(k), "内置图标含 " + k));
+      const svgNew = SN.uiIcons.get("new");
+      assert(svgNew.indexOf("<svg") === 0 && svgNew.indexOf("<path") > 0, "图标返回完整 svg 字符串");
+      assert(svgNew.indexOf('stroke="currentColor"') > 0, "图标用 currentColor，跟随主题不写死颜色");
+      assert(SN.uiIcons.get("__不存在__") === "", "未知图标返回空串，调用方据此回退");
+      // 线宽统一：同一套图标只有一种 stroke-width
+      const widths = Array.from(new Set(SN.uiIcons.names().map(k => (SN.uiIcons.get(k).match(/stroke-width="([^"]+)"/) || [])[1])));
+      assert(widths.length === 1 && widths[0] === "1.5", "所有图标共用同一 stroke-width，实际=" + widths.join(","));
+      // path 数据合法性：只含 SVG 路径指令与数字
+      SN.uiIcons.names().forEach(k => {
+        const ds = SN.uiIcons.PATHS[k];
+        assert(Array.isArray(ds) && ds.length > 0, k + " 至少有 1 条 path");
+        assert(ds.every(d => /^[MmLlHhVvCcSsQqTtAaZz0-9.,\- ]+$/.test(d)), k + " 的 path 数据只含合法指令");
+      });
+      // 工具栏确实渲染成 SVG，且不再写 emoji 字形（emoji 仅作为模块缺失时的兜底）
+      const withSvg = tbAll.filter(b => String(b.innerHTML || "").indexOf("<svg") >= 0).length;
+      assert(withSvg === tbAll.length, "每个工具栏按钮都渲染 SVG，实际 " + withSvg + "/" + tbAll.length);
+      assert(tbAll.every(b => !b.textContent), "工具栏不再写 emoji 字形（textContent 为空）");
+      const emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u;
+      assert(!emojiRe.test(tbAll.map(b => String(b.innerHTML || "") + String(b.textContent || "")).join("")),
+        "工具栏按钮里不残留 emoji / 箭头字形");
+    }
 
     // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染
     const d0 = SN.app.docs.filter(d => d.editor)[0];

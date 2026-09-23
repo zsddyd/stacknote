@@ -357,10 +357,13 @@
       if (def === "-") { toolbar.appendChild(el("div", { class: "tbsep" })); continue; }
       // 同菜单：当前视图不具备所需能力时置灰并说明原因（不接点击，tooltip 仍可见）
       const why = def.requires && SN.caps ? SN.caps.reason(def.requires, activeDoc()) : "";
+      // 图标：优先用内联 SVG（js/iconui.js，Tabler 字形，跟随主题色），模块缺失时退回原来的 emoji 字形
+      const svg = SN.uiIcons ? SN.uiIcons.get(key) : "";
       const b = el("button", {
         class: "iconbt" + (def.toggle && def.toggle() ? " on" : "") + (why ? " disabled" : ""),
         title: why ? (def.t + " — " + why) : def.t,
-        text: def.g
+        html: svg || null,
+        text: svg ? null : def.g
       });
       if (why) b.setAttribute("aria-disabled", "true");
       if (def.disabled) b.disabled = true;

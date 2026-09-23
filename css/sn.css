@@ -68,6 +68,7 @@ label{user-select:none}
   display:inline-flex;align-items:center;justify-content:center;font-size:14px}
 #toolbar .iconbt:hover{background:var(--btn-hover-a)}
 #toolbar .iconbt.on{background:var(--selection);color:#fff}
+#toolbar .iconbt svg{width:20px;height:20px;display:block}
 .ico{display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;font-size:12px}
 
 /* ---------- 工作区 ---------- */

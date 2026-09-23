@@ -132,6 +132,7 @@ js/storage.js          IndexedDB 封装（设置/会话/用户插件）
 js/editor.js           编辑器控件（覆盖层高亮、行号、撤销、书签、缩放）
 js/textops.js          文本变换纯函数
 js/menu.js             弹出菜单机制（顶栏下拉与右键菜单共用的渲染器/子菜单/键盘导航/宿主委托）
+js/iconui.js           工具栏图标（内联 SVG，字形取自 Tabler Icons，MIT；零依赖、跟随主题色）
 js/app.js              应用框架：菜单/工具栏/标签/文档/状态栏/对话框骨架
 js/app2.js             业务实现：查找/编辑操作/Hex/工具/插件/选项/启动
 ```
@@ -198,3 +199,5 @@ maskable 与 apple-touch 需要在满幅橙底（`#FAAA3C`）上把母版缩到 
 ### 出处与致谢
 
 StackNote 是桌面文本编辑器 **notepad--**（[gitee.com/cxasm/notepad--](https://gitee.com/cxasm/notepad--) / [github.com/cxasm/notepad--](https://github.com/cxasm/notepad--) ，GPL-3.0）的独立前端重实现：仅参考其交互与功能布局进行纯前端开发，不含原项目的 C++/Qt 代码。原项目以 GPL-3.0 发布，依据其许可要求，本项目在此声明出处并沿用 GPL-3.0 许可发布。
+
+工具栏图标的字形取自 **Tabler Icons**（[github.com/tabler/tabler-icons](https://github.com/tabler/tabler-icons)，MIT License），只保留本项目用到的那些，并按统一规格（24 网格 / 1.5px 描边 / `currentColor`）内联在 `js/iconui.js` 中，不引入任何运行时依赖。
