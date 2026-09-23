@@ -237,11 +237,6 @@
   };
 
   // ============ 编码 ============
-  function bytesFor(doc) {
-    if (doc.raw && doc.raw.length) return doc.raw;
-    if (doc.handle) return doc.handle.getFile().then(f => SN.readAsBytes(f));
-    return null;
-  }
   cmd.reloadWith = async function (code) {
     const d = SN.activeDoc();
     if (!d) return;

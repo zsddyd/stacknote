@@ -370,13 +370,6 @@
       toolbar.appendChild(b);
     }
   }
-  function refreshToolbar() {
-    const map = { wrap: "wrap", blank: "blank" };
-    SN.$$("#toolbar .iconbt").forEach(bt => {
-      const key = bt.title && bt.title.length ? bt.title : "";
-    });
-  }
-
   // ============ 文档与标签 ============
   const tabstrip = SN.$("#tabstrip");
   const editorZone = SN.$("#editorZone");
@@ -604,10 +597,6 @@
   SN.tool = tool;
 
   // ---- 打开 / 保存 / 新建 / 关闭 ----
-  function supportedOpen() {
-    return !!(window.showOpenFilePicker || document.createElement("input").webkitdirectory !== undefined || true);
-  }
-
   cmd.open = function (mode) {
     app.pendingOpenMode = mode || "auto";
     SN.$("#fileInput").value = "";
@@ -1218,9 +1207,9 @@
   // 文件/编辑子命令占位，app2 覆盖
   const placeholders = ["eolConv", "blankOp", "tabOp", "caseOp", "lineOp", "sortOp", "edStatus",
     "toggleWrap", "toggleSpaces", "toggleEol", "toggleWeb", "toggleFileDock", "toggleToolbar",
-    "toggleResultDock", "isDockVisible", "copyResultDock", "reloadWith", "convertTo", "reloadAs",
+    "toggleResultDock", "copyResultDock", "reloadWith", "convertTo", "reloadAs",
     "markAll", "clearMarksAll", "wordHighlight", "toggleBookmark", "gotoBookmark", "clearBookmarks",
-    "openDefineLang", "zoom", "setStatusbar", "refreshStatus", "showHexBytes"];
+    "openDefineLang", "zoom"];
   placeholders.forEach(n => { if (cmd[n] === undefined) cmd[n] = () => toast("该功能在演示版暂不可用：" + n); });
 
   // ============ Boot ============
@@ -1332,7 +1321,6 @@
   SN.closeModal = closeModal;
   SN.showCtx = showCtx;
   SN.addDoc = addDoc;
-  SN.openModal = openModal;
   SN.refreshMenus = refreshMenus;
   SN.saveSettings = saveSettings;
   SN.encodeDocContent = encodeDocContent;
