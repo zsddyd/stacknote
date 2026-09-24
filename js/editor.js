@@ -88,6 +88,8 @@
       this.pre = pre;
       this.ta = ta;
       this.applyZoom(this.zoom);
+      // 自绘滚动条：大文档的原生滑块会缩到十几像素，改由 js/scrollbar.js 画一层带最小长度的滑块
+      if (SN.scrollbar) this.sb = SN.scrollbar.attach(ta, main);
     }
 
     _bind() {
@@ -383,6 +385,7 @@
       this._lineH = lh;
       this._renderGutter();
       this._syncScroll();
+      if (this.sb) this.sb.update();
     }
 
     setWrap(on) {
@@ -531,6 +534,7 @@
       }
       this._renderGutter();
       this._syncScroll();
+      if (this.sb) this.sb.update();     // 文本变了 → 内容高/宽变了，自绘滑块要跟着重算
     }
 
     _renderGutter() {

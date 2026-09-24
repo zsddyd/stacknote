@@ -83,6 +83,10 @@ const documentStub = {
   // 记录监听器（而非丢弃）：这样才能对「真实按键链路」做断言，例如 Ctrl+Shift+F 的分发
   handlers: {},
   addEventListener(t, f) { (this.handlers[t] = this.handlers[t] || []).push(f); },
+  removeEventListener(t, f) {
+    const a = this.handlers[t];
+    if (a) { const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); }
+  },
   querySelector(sel) {
     if (!registry[sel]) registry[sel] = makeNode("div");
     return registry[sel];
@@ -114,6 +118,8 @@ const globals = {
   Blob: class { },
   FileReader: class { },
   getComputedStyle: () => ({ lineHeight: "21.7px" }),
+  // 与浏览器一致：交给 js/scrollbar.js 判断「是否桌面精确指针」；桩默认按桌面鼠标处理
+  matchMedia: (q) => ({ matches: /hover:\s*hover/.test(String(q)), media: String(q) }),
   addEventListener() { },
   removeEventListener() { }
 };
@@ -125,7 +131,7 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
 const files = [
-  "js/util.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
+  "js/util.js", "js/scrollbar.js", "js/viewcaps.js", "js/shortcuts.js", "js/themes.js", "js/langdefs.js", "js/highlight.js",
   "js/encoding.js", "js/hash.js", "js/storage.js", "js/editor.js",
   "js/bigtext.js",
   "js/textops.js", "js/menu.js", "js/iconui.js", "js/app.js", "js/app2.js"
@@ -961,6 +967,149 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       // ⑤ 触觉反馈 + 减少动态效果的兜底
       assert(cssSrc.indexOf("button:active") >= 0, "按钮有按下反馈（:active）");
       assert(cssSrc.indexOf("prefers-reduced-motion") >= 0, "有 prefers-reduced-motion 兜底");
+      // ⑥ 滚动条：各平台原生绘制差异大（Windows 常驻槽位 + 步进箭头、macOS overlay 会淡出、
+      // Linux 随 GTK 变），统一自绘并跟随主题 —— 尺寸固定、去掉箭头与交汇方块、颜色只引用主题变量
+      const sbBlock = (sel) => {
+        const m = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}").exec(cssSrc);
+        return m ? m[1] : "";
+      };
+      const sbBar = sbBlock("::-webkit-scrollbar");
+      assert(/width\s*:\s*var\(--sb-size\)/.test(sbBar) && /height\s*:\s*var\(--sb-size\)/.test(sbBar),
+        "垂直与水平滚动条共用 --sb-size，粗细跨平台一致");
+      assert(/^\d+px$/.test(String(cssVars["--sb-size"]).trim()),
+        "--sb-size 是固定像素值，实际=" + cssVars["--sb-size"]);
+      assert(/display\s*:\s*none/.test(sbBlock("::-webkit-scrollbar-button")),
+        "去掉 Windows 的步进箭头按钮（平台差异最大的来源之一）");
+      assert(/background(?:-color)?\s*:\s*var\(--sb-track\)/.test(sbBlock("::-webkit-scrollbar-track")),
+        "轨道颜色来自主题变量 --sb-track");
+      const sbThumb = sbBlock("::-webkit-scrollbar-thumb");
+      assert(/background-color\s*:\s*var\(--sb-thumb\)/.test(sbThumb), "滑块颜色来自主题变量 --sb-thumb");
+      assert(/background-clip\s*:\s*content-box/.test(sbThumb), "滑块用 content-box 裁切内缩出比槽位窄的视觉宽度");
+      assert(/::-webkit-scrollbar-thumb:hover[^{]*\{[^}]*var\(--sb-thumb-hover\)/.test(cssSrc),
+        "滑块 hover 态用 --sb-thumb-hover");
+      assert(/::-webkit-scrollbar-corner\{[^}]*background:transparent/.test(cssSrc), "两轴交汇方块显式绘制为透明");
+      assert(/\.ed-input::-webkit-scrollbar-track[^{]*\{[^}]*var\(--ed-bg\)/.test(cssSrc),
+        "编辑区轨道铺编辑区底色，高亮文本不会从槽位里透出来");
+      assert(/@supports\s+not\s*\(\s*selector\(::-webkit-scrollbar\)\s*\)/.test(cssSrc) &&
+        /scrollbar-color:var\(--sb-thumb\)\s+var\(--sb-track\)/.test(cssSrc) &&
+        /scrollbar-width:thin/.test(cssSrc),
+        "Firefox 退回标准属性（scrollbar-color + scrollbar-width:thin），颜色仍跟随主题");
+      // 自绘样式里不许写死色值，否则换主题时滚动条不跟随
+      const sbRules = cssSrc.match(/::-webkit-scrollbar[a-z-]*\{[^}]*\}/g) || [];
+      const sbHardColor = sbRules.join("").match(/#[0-9a-fA-F]{3,8}|rgba?\(/g) || [];
+      assert(sbRules.length >= 5 && sbHardColor.length === 0,
+        "滚动条样式不写死颜色，实际=" + sbHardColor.join(","));
+      // ⑦ 自绘滚动条（js/scrollbar.js）：内容极长时原生滑块会缩到十几像素，Chromium 又忽略
+      //    ::-webkit-scrollbar-thumb 的 min-height，所以长内容容器改用自绘 overlay 滑块
+      assert(cssSrc.indexOf("sb-native-hidden") >= 0, "css 提供隐藏原生滚动条的 .sb-native-hidden");
+      assert(/\.sb-track\.sb-v\{[^}]*width:var\(--sb-size\)/.test(cssSrc), "自绘垂直轨道与 --sb-size 同宽");
+      assert(/\.sb-track\.sb-h\{[^}]*height:var\(--sb-size\)/.test(cssSrc), "自绘水平轨道与 --sb-size 同高");
+      assert(/\.sb-thumb\{[^}]*background-color:var\(--sb-thumb\)/.test(cssSrc), "自绘滑块颜色来自主题变量");
+      assert(/\.sb-thumb:hover[^{]*\{[^}]*var\(--sb-thumb-hover\)/.test(cssSrc), "自绘滑块 hover 用主题变量");
+      assert(/\.sb-thumb\.dragging/.test(cssSrc), "拖动中保持高亮（有按下反馈）");
+      assert(/\.ed-main \.sb-track[^{]*\{[^}]*var\(--ed-bg\)/.test(cssSrc), "编辑区自绘轨道铺编辑区底色");
+      assert(/\.sb-touch \.sb-track\{pointer-events:none\}/.test(cssSrc) &&
+        /\.sb-touch \.sb-thumb\{pointer-events:auto\}/.test(cssSrc),
+        "触屏：轨道不拦事件（整片仍可触摸滚动），只有滑块可拖");
+      assert(/\.sb-touch \.sb-thumb::after\{[^}]*inset:-8px/.test(cssSrc),
+        "触屏：滑块热区外扩 8px（视觉不变，命中区 24px）");
+      assert(/\.sb-mar-r\{margin-right:var\(--sb-size\)\}/.test(cssSrc) &&
+        /\.sb-mar-b\{margin-bottom:var\(--sb-size\)\}/.test(cssSrc),
+        "滚动元素让出同宽槽位（margin，不用宿主 padding），自绘滑块不盖住最后一行/行尾");
+      assert(/\.ed-input\.sb-mar-r\{[^}]*width:auto\}/.test(cssSrc) &&
+        /\.ed-input\.sb-mar-b\{[^}]*height:auto\}/.test(cssSrc),
+        "textarea 让位时改回 width/height:auto（它显式写了 100%，且 .ed-input 的 margin:0 会盖掉通用让位规则）");
+      // 纯函数：长度下限按「窗口像素」兜底，而不是跟着内容继续等比缩短
+      const TL = SN.scrollbar.thumbLen;
+      assert(SN.scrollbar.MIN_THUMB >= 44, "滑块最小长度不小于 44px（WCAG 2.5.5 目标尺寸），实际=" + SN.scrollbar.MIN_THUMB);
+      const hugeLen = TL(441, 440008, 441);
+      assert(hugeLen === SN.scrollbar.MIN_THUMB,
+        "内容 44 万 px / 视口 441px 时滑块取下限 " + SN.scrollbar.MIN_THUMB + "px（原生只有 13px），实际=" + hugeLen);
+      assert(TL(441, 882, 441) === 221, "内容 2 倍视口时滑块约占轨道一半，实际=" + TL(441, 882, 441));
+      assert(TL(441, 441, 441) === 441, "不溢出时滑块铺满轨道，实际=" + TL(441, 441, 441));
+      assert(TL(0, 1000, 441) === 0 && TL(441, 0, 441) === 441,
+        "视口为 0 时滑块归 0；内容不可知（total=0）按不溢出处理铺满轨道，都不产生 NaN");
+      assert(TL(441, 440008, 20) <= 10, "轨道极短时滑块不超过轨道一半，实际=" + TL(441, 440008, 20));
+      let prevLen = Infinity, mono = true;
+      [2, 10, 100, 1000, 100000].forEach(k => {
+        const v = TL(441, 441 * k, 441);
+        if (v > prevLen) mono = false;
+        prevLen = v;
+      });
+      assert(mono, "内容越长滑块越短（单调不增）");
+      // 接入点与依赖顺序：模块本身要排在两个使用者之前
+      const editorSrc = fs.readFileSync(path.join(__dirname, "js/editor.js"), "utf8");
+      const bigtextSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
+      assert(/SN\.scrollbar\.attach\(/.test(editorSrc), "js/editor.js 给编辑器 textarea 接入了自绘滚动条");
+      assert(/SN\.scrollbar\.attach\(/.test(bigtextSrc), "js/bigtext.js 给大文件视口接入了自绘滚动条");
+      const idxHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+      assert(idxHtml.indexOf("js/scrollbar.js") >= 0, "index.html 引入了 js/scrollbar.js");
+      assert(idxHtml.indexOf("js/scrollbar.js") < idxHtml.indexOf("js/editor.js") &&
+        idxHtml.indexOf("js/scrollbar.js") < idxHtml.indexOf("js/bigtext.js"),
+        "js/scrollbar.js 排在 js/editor.js / js/bigtext.js 之前（script 顺序即依赖顺序）");
+      // 行为：桩容器上 attach 出两条轨道，极长内容下取最小长度，拖动按比例跟随
+      const sbScroller = SN.el("div", { class: "fake-scroller" });
+      const sbHost = SN.el("div", { class: "fake-host" });
+      sbHost.appendChild(sbScroller);
+      sbScroller.clientHeight = 441;
+      sbScroller.scrollHeight = 440008;
+      sbScroller.clientWidth = 400;
+      sbScroller.scrollWidth = 40000;
+      sbScroller.scrollTop = 220000;
+      const sbApi = SN.scrollbar.attach(sbScroller, sbHost);
+      const sbTracks = sbHost.children.filter(c => /sb-track/.test(String(c.className)));
+      assert(sbApi && sbTracks.length === 2, "attach 在宿主上挂出垂直/水平两条轨道，实际=" + sbTracks.length);
+      assert(sbScroller.classList.contains("sb-native-hidden"), "attach 后隐藏原生滚动条");
+      assert(sbApi.vertical.thumb.style.height === "48px",
+        "极长内容下垂直滑块高度取最小长度，实际=" + sbApi.vertical.thumb.style.height);
+      assert(sbApi.horizontal.thumb.style.width === "48px",
+        "极宽内容下水平滑块宽度取最小长度，实际=" + sbApi.horizontal.thumb.style.width);
+      assert(sbScroller.classList.contains("sb-mar-r") && sbScroller.classList.contains("sb-mar-b"),
+        "两轴都溢出时滚动元素同时让出右/下槽位，滑块不盖内容");
+      assert(SN.scrollbar.attach(sbScroller, sbHost) === sbApi, "重复 attach 幂等，返回同一实例");
+      // 触屏分支：没有精确指针但有触摸能力 → 宿主标记 sb-touch（轨道让出事件），滑块热区靠 CSS 扩大
+      const sbTouch = SN.el("div", { class: "fake-scroller" });
+      const sbTouchHost = SN.el("div", { class: "fake-host" });
+      sbTouchHost.appendChild(sbTouch);
+      sbTouch.clientHeight = 400;
+      sbTouch.scrollHeight = 4000;
+      sbTouch.clientWidth = 300;
+      sbTouch.scrollWidth = 300;
+      const sbSavedTouches = sandbox.navigator.maxTouchPoints;
+      sandbox.navigator.maxTouchPoints = 5;               // 模拟安卓手机
+      const sbTouchApi = SN.scrollbar.attach(sbTouch, sbTouchHost);
+      sandbox.navigator.maxTouchPoints = sbSavedTouches;
+      assert(sbTouchApi && sbTouchHost.classList.contains("sb-touch"),
+        "触屏设备同样接管绘制（安卓原生 overlay 静止即隐藏，看不见也拖不到）");
+      assert(sbTouchApi && sbTouch.classList.contains("sb-mar-r") &&
+        !sbTouch.classList.contains("sb-mar-b"),
+        "触屏同样按轴让位：只溢出纵向时只让底部");
+      // 内容不溢出时不该白留空槽位
+      const sbPlain = SN.el("div", { class: "fake-scroller" });
+      const sbPlainHost = SN.el("div", { class: "fake-host" });
+      sbPlainHost.appendChild(sbPlain);
+      sbPlain.clientHeight = 400;
+      sbPlain.scrollHeight = 400;
+      sbPlain.clientWidth = 300;
+      sbPlain.scrollWidth = 300;
+      SN.scrollbar.attach(sbPlain, sbPlainHost);
+      assert(!sbPlain.classList.contains("sb-mar-r") && !sbPlain.classList.contains("sb-mar-b"),
+        "内容不溢出时不让位，不留空槽");
+      const sbEvt = (y) => ({ clientY: y, clientX: y, button: 0, pointerId: 1, preventDefault() { }, stopPropagation() { } });
+      const sbMoveCount = () => (sandbox.document.handlers.pointermove || []).length;
+      const sbUpCount = () => (sandbox.document.handlers.pointerup || []).length;
+      const sbMovesBefore = sbMoveCount(), sbUpsBefore = sbUpCount();
+      sbApi.vertical.thumb.handlers.pointerdown[0](sbEvt(100));
+      assert(sbMoveCount() === sbMovesBefore + 1 && sbUpCount() === sbUpsBefore + 1,
+        "按下滑块后挂上 document 级 pointermove/pointerup（拖出滑块也跟手）");
+      (sandbox.document.handlers.pointermove || [])[sbMoveCount() - 1](sbEvt(200));
+      const sbWant = 220000 + Math.round(100 * ((440008 - 441) / (441 - 48)));
+      assert(Math.abs(sbScroller.scrollTop - sbWant) <= 2,
+        "拖动 100px 后滚动位置按比例跟随（期望 " + sbWant + "，实际=" + sbScroller.scrollTop + "）");
+      (sandbox.document.handlers.pointerup || [])[sbUpCount() - 1](sbEvt(200));
+      assert(sbMoveCount() === sbMovesBefore && sbUpCount() === sbUpsBefore, "松开后解绑 document 级拖动监听，不留悬挂监听");
+      assert(/^[0-9]{1,3}$/.test(String(sbApi.vertical.thumb["aria-valuenow"])),
+        "自绘滑块同步 aria-valuenow（读屏能知道滚动位置），实际=" + sbApi.vertical.thumb["aria-valuenow"]);
     }
 
     // ② 文本视图：右键接管、菜单项齐备、不含「粘贴」、且不触发编辑器渲染
