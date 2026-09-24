@@ -912,10 +912,18 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const defChrome = SN.chromeOf(SN.getTheme("default"));
       const defFg = SN.getTheme("default").fg;
       const fallback = Object.assign({}, defChrome, { "--ed-fg": defFg, "--ed-caret": defFg });
-      ["--text", "--selection", "--ed-fg", "--ed-caret", "--panel", "--border", "--btn-bg"].forEach(k => {
-        const m = new RegExp(k.replace("--", "\\-\\-") + "\\s*:\\s*([^;}]+)").exec(cssSrc);
-        assert(m && m[1].trim().toLowerCase() === String(fallback[k]).toLowerCase(),
-          "首屏兜底 " + k + " 与 Default 主题一致，实际=" + (m && m[1].trim()) + " 期望=" + fallback[k]);
+      // 检查范围 = 全部界面变量（chromeOf 的键）+ 编辑区前景/光标；取值只认 :root 首屏兜底块，
+      // 且先剥掉注释，免得 --accent 那类行内注释混进取值
+      const rootBlock = /:root\s*\{([\s\S]*?)\}/.exec(cssSrc.replace(/\/\*[\s\S]*?\*\//g, ""));
+      assert(rootBlock, "css/sn.css 存在 :root 首屏兜底块");
+      const cssVars = {};
+      const varRe = /(--[A-Za-z0-9-]+)\s*:\s*([^;}]+)/g;
+      let mv;
+      while ((mv = varRe.exec(rootBlock[1]))) if (cssVars[mv[1]] === undefined) cssVars[mv[1]] = mv[2].trim();
+      Object.keys(fallback).forEach(k => {
+        const got = cssVars[k];
+        assert(got !== undefined && got.toLowerCase() === String(fallback[k]).toLowerCase(),
+          "首屏兜底 " + k + " 与 Default 主题一致，实际=" + got + " 期望=" + fallback[k]);
       });
       assert(cssSrc.indexOf("rgba(0,0,0") < 0, "css/sn.css 不再出现纯黑半透明（阴影需带底色）");
       assert(/box-shadow:[^;]*rgba\(\s*38\s*,\s*40\s*,\s*44/.test(cssSrc), "投影使用带底色的 rgba(38,40,44,…)");
