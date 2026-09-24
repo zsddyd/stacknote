@@ -906,6 +906,17 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       assert(pureBlack.length === 0, "主题 bg/fg 不使用纯黑，实际命中=" + pureBlack.join(","));
       // ② CSS 里不再有纯黑实色或纯黑投影（投影要带底色）
       assert(cssSrc.indexOf("#000000") < 0, "css/sn.css 不再出现 #000000");
+      // #000 三位简写同样是纯黑（上一版只查了六位写法，漏掉了首屏兜底里的 --text/--ed-caret）
+      assert(!/#000(?![0-9a-fA-F])/.test(cssSrc), "css/sn.css 不再出现 #000 简写纯黑");
+      // 首屏兜底要和 Default 主题推导值一致，否则首帧会闪一下旧配色
+      const defChrome = SN.chromeOf(SN.getTheme("default"));
+      const defFg = SN.getTheme("default").fg;
+      const fallback = Object.assign({}, defChrome, { "--ed-fg": defFg, "--ed-caret": defFg });
+      ["--text", "--selection", "--ed-fg", "--ed-caret", "--panel", "--border", "--btn-bg"].forEach(k => {
+        const m = new RegExp(k.replace("--", "\\-\\-") + "\\s*:\\s*([^;}]+)").exec(cssSrc);
+        assert(m && m[1].trim().toLowerCase() === String(fallback[k]).toLowerCase(),
+          "首屏兜底 " + k + " 与 Default 主题一致，实际=" + (m && m[1].trim()) + " 期望=" + fallback[k]);
+      });
       assert(cssSrc.indexOf("rgba(0,0,0") < 0, "css/sn.css 不再出现纯黑半透明（阴影需带底色）");
       assert(/box-shadow:[^;]*rgba\(\s*38\s*,\s*40\s*,\s*44/.test(cssSrc), "投影使用带底色的 rgba(38,40,44,…)");
       // ③ 选中底色 + 白字达到 WCAG AA 4.5:1（白字用在工具栏激活态/菜单 hover/结果命中上）

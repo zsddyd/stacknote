@@ -3,10 +3,10 @@
   --border:#D1D1D1;
   --btn-bg:#E0E0E0;
   --btn-hover-a:#FFFFFF; --btn-hover-b:#E0E0E0;
-  --selection:#B27326;
+  --selection:#8A5E21;
   --panel:#EDEDED;
   --panel2:#FFFFFF;
-  --text:#000;
+  --text:#111214;
   --text-weak:#6B6B6B;
   --hl-row:#FFEBCB;
   --hlw:#FFEB3B;
@@ -15,7 +15,7 @@
   /* 以下变量由 themes.js 按主题写入 <html> 内联样式；这里的值只是首屏兜底（= Default 主题） */
   --ed-bg:#FFFFFF; --ed-fg:#111214;
   --ed-line-num:#808080; --ed-gutter-bg:#f0f0f0;
-  --ed-caret:#000;
+  --ed-caret:#111214;
   --ed-selection:rgba(0,204,255,.30);
   --ed-active-line:rgba(17,18,20,.05);
   --ed-fold-fg:#888;
