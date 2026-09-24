@@ -39,7 +39,8 @@
             <button class="dockclean" title="清除">×</button>
           </span>
         </div>
-        <div id="resultView"></div>
+        <!-- .dockbody 与 #resultView 等大：自绘滚动条（js/scrollbar.js）以它为定位基准叠滑块 -->
+        <div class="dockbody"><div id="resultView"></div></div>
       </div>
     </div>
 
@@ -49,7 +50,7 @@
         <span class="docktitle">文件列表</span>
         <span class="docktools"><button class="dockclean" title="关闭">×</button></span>
       </div>
-      <ul id="fileList"></ul>
+      <div class="dockbody"><ul id="fileList"></ul></div>
     </aside>
   </div>
 

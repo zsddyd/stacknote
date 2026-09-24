@@ -86,14 +86,8 @@ label{user-select:none}
 .sb-touch .sb-track{pointer-events:none}
 .sb-touch .sb-thumb{pointer-events:auto}
 .sb-touch .sb-thumb::after{content:"";position:absolute;inset:-8px}
-/* 自绘滑块浮在内容之上，滚动元素让出同宽槽位（原生滚动条本来就占位），避免盖住最后一行/行尾。
-   用 margin 而不是宿主 padding：编辑器 textarea 是 absolute + inset:0，宿主 padding 对它无效。 */
-.sb-mar-r{margin-right:var(--sb-size)}
-.sb-mar-b{margin-bottom:var(--sb-size)}
-/* 编辑器 textarea 要特殊处理两处：它显式写了 width/height:100%（让位时必须改回 auto），
-   并且 .ed-hl,.ed-input 那条 margin:0 与通用让位规则同特异性、位置更靠后会盖掉它。 */
-.ed-input.sb-mar-r{margin-right:var(--sb-size);width:auto}
-.ed-input.sb-mar-b{margin-bottom:var(--sb-size);height:auto}
+/* 让位（滚动元素让出 --sb-size 宽的槽位，滑块不盖内容）由 js/scrollbar.js 写成内联样式：
+   容器普遍带 #id{margin:0} 这类高特异性规则，放在 CSS 类里会被压掉。 */
 
 #app{display:flex;flex-direction:column;height:100vh}
 
@@ -190,6 +184,9 @@ label{user-select:none}
 /* ---------- 停靠 ---------- */
 .dockhead{display:flex;align-items:center;justify-content:space-between;background:var(--panel);
   border-bottom:1px solid var(--border);padding:2px 6px;user-select:none}
+/* 停靠窗正文：与里层滚动容器等大，自绘滚动条（js/scrollbar.js）以它为定位基准叠滑块。
+   不加 overflow，滚动交给里层的 #fileList / #resultView，触摸滚动与键盘翻页都不受影响。 */
+.dockbody{flex:1;min-height:0;position:relative;display:flex}
 .dockclean{border:0;background:none;font-size:14px;padding:0 6px}
 #fileDock{width:230px;flex:0 0 auto;border-left:1px solid var(--border);background:var(--panel2);
   display:flex;flex-direction:column;min-height:0}

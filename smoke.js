@@ -1013,12 +1013,13 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         "触屏：轨道不拦事件（整片仍可触摸滚动），只有滑块可拖");
       assert(/\.sb-touch \.sb-thumb::after\{[^}]*inset:-8px/.test(cssSrc),
         "触屏：滑块热区外扩 8px（视觉不变，命中区 24px）");
-      assert(/\.sb-mar-r\{margin-right:var\(--sb-size\)\}/.test(cssSrc) &&
-        /\.sb-mar-b\{margin-bottom:var\(--sb-size\)\}/.test(cssSrc),
-        "滚动元素让出同宽槽位（margin，不用宿主 padding），自绘滑块不盖住最后一行/行尾");
-      assert(/\.ed-input\.sb-mar-r\{[^}]*width:auto\}/.test(cssSrc) &&
-        /\.ed-input\.sb-mar-b\{[^}]*height:auto\}/.test(cssSrc),
-        "textarea 让位时改回 width/height:auto（它显式写了 100%，且 .ed-input 的 margin:0 会盖掉通用让位规则）");
+      const scrollbarSrc = fs.readFileSync(path.join(__dirname, "js/scrollbar.js"), "utf8");
+      // 让位规则必须由脚本内联写（容器普遍带 #id{margin:0}，CSS 类会被压掉），值仍取 var(--sb-size)
+      assert(/scroller\.style\.marginRight = needV \? "var\(--sb-size\)"/.test(scrollbarSrc) &&
+        /scroller\.style\.marginBottom = needH \? "var\(--sb-size\)"/.test(scrollbarSrc),
+        "让位用内联样式 + var(--sb-size)（尺寸单一来源仍在 CSS，且压得过 #id{margin:0}）");
+      assert(/scroller\.tagName === "TEXTAREA"/.test(scrollbarSrc),
+        "textarea 让位时额外把 width/height 改回 auto（它显式写了 100%）");
       // 纯函数：长度下限按「窗口像素」兜底，而不是跟着内容继续等比缩短
       const TL = SN.scrollbar.thumbLen;
       assert(SN.scrollbar.MIN_THUMB >= 44, "滑块最小长度不小于 44px（WCAG 2.5.5 目标尺寸），实际=" + SN.scrollbar.MIN_THUMB);
@@ -1042,11 +1043,20 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const bigtextSrc = fs.readFileSync(path.join(__dirname, "js/bigtext.js"), "utf8");
       assert(/SN\.scrollbar\.attach\(/.test(editorSrc), "js/editor.js 给编辑器 textarea 接入了自绘滚动条");
       assert(/SN\.scrollbar\.attach\(/.test(bigtextSrc), "js/bigtext.js 给大文件视口接入了自绘滚动条");
+      const appSrc = fs.readFileSync(path.join(__dirname, "js/app.js"), "utf8");
+      assert(/\[\s*"#fileList",\s*"#resultView"\s*\][\s\S]{0,300}SN\.scrollbar\.attach/.test(appSrc),
+        "js/app.js 让文件列表与结果面板复用同一套自绘滚动条");
       const idxHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
       assert(idxHtml.indexOf("js/scrollbar.js") >= 0, "index.html 引入了 js/scrollbar.js");
       assert(idxHtml.indexOf("js/scrollbar.js") < idxHtml.indexOf("js/editor.js") &&
         idxHtml.indexOf("js/scrollbar.js") < idxHtml.indexOf("js/bigtext.js"),
         "js/scrollbar.js 排在 js/editor.js / js/bigtext.js 之前（script 顺序即依赖顺序）");
+      // 停靠窗正文与滚动容器等大，才能当 overlay 的定位基准（上方还有 .dockhead 标题栏）
+      assert(/<div class="dockbody"><ul id="fileList"><\/ul><\/div>/.test(idxHtml) &&
+        /<div class="dockbody"><div id="resultView"><\/div><\/div>/.test(idxHtml),
+        "index.html 里 #fileList / #resultView 各自包在等大的 .dockbody 中");
+      assert(/\.dockbody\{[^}]*position:relative[^}]*\}/.test(cssSrc) && /\.dockbody\{[^}]*flex:1[^}]*\}/.test(cssSrc),
+        ".dockbody 提供 flex:1 与定位上下文，且自身不滚动（滚动交给里层容器）");
       // 行为：桩容器上 attach 出两条轨道，极长内容下取最小长度，拖动按比例跟随
       const sbScroller = SN.el("div", { class: "fake-scroller" });
       const sbHost = SN.el("div", { class: "fake-host" });
@@ -1064,8 +1074,9 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         "极长内容下垂直滑块高度取最小长度，实际=" + sbApi.vertical.thumb.style.height);
       assert(sbApi.horizontal.thumb.style.width === "48px",
         "极宽内容下水平滑块宽度取最小长度，实际=" + sbApi.horizontal.thumb.style.width);
-      assert(sbScroller.classList.contains("sb-mar-r") && sbScroller.classList.contains("sb-mar-b"),
-        "两轴都溢出时滚动元素同时让出右/下槽位，滑块不盖内容");
+      assert(sbScroller.style.marginRight === "var(--sb-size)" && sbScroller.style.marginBottom === "var(--sb-size)",
+        "两轴都溢出时滚动元素让出右/下槽位（内联 var(--sb-size)），滑块不盖内容，实际=" +
+        sbScroller.style.marginRight + "," + sbScroller.style.marginBottom);
       assert(SN.scrollbar.attach(sbScroller, sbHost) === sbApi, "重复 attach 幂等，返回同一实例");
       // 触屏分支：没有精确指针但有触摸能力 → 宿主标记 sb-touch（轨道让出事件），滑块热区靠 CSS 扩大
       const sbTouch = SN.el("div", { class: "fake-scroller" });
@@ -1081,8 +1092,7 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       sandbox.navigator.maxTouchPoints = sbSavedTouches;
       assert(sbTouchApi && sbTouchHost.classList.contains("sb-touch"),
         "触屏设备同样接管绘制（安卓原生 overlay 静止即隐藏，看不见也拖不到）");
-      assert(sbTouchApi && sbTouch.classList.contains("sb-mar-r") &&
-        !sbTouch.classList.contains("sb-mar-b"),
+      assert(sbTouchApi && sbTouch.style.marginRight === "var(--sb-size)" && !sbTouch.style.marginBottom,
         "触屏同样按轴让位：只溢出纵向时只让底部");
       // 内容不溢出时不该白留空槽位
       const sbPlain = SN.el("div", { class: "fake-scroller" });
@@ -1093,8 +1103,19 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       sbPlain.clientWidth = 300;
       sbPlain.scrollWidth = 300;
       SN.scrollbar.attach(sbPlain, sbPlainHost);
-      assert(!sbPlain.classList.contains("sb-mar-r") && !sbPlain.classList.contains("sb-mar-b"),
+      assert(!sbPlain.style.marginRight && !sbPlain.style.marginBottom,
         "内容不溢出时不让位，不留空槽");
+      // textarea 额外把 width/height 改回 auto（它显式写了 100%，否则 margin 缩不动）
+      const sbTa = SN.el("textarea", { class: "ed-input" });
+      const sbTaHost = SN.el("div", { class: "fake-host" });
+      sbTaHost.appendChild(sbTa);
+      sbTa.clientHeight = 300;
+      sbTa.scrollHeight = 6000;
+      sbTa.clientWidth = 500;
+      sbTa.scrollWidth = 5000;
+      SN.scrollbar.attach(sbTa, sbTaHost);
+      assert(sbTa.style.width === "auto" && sbTa.style.height === "auto",
+        "textarea 让位时把 width/height 改回 auto，实际=" + sbTa.style.width + "/" + sbTa.style.height);
       const sbEvt = (y) => ({ clientY: y, clientX: y, button: 0, pointerId: 1, preventDefault() { }, stopPropagation() { } });
       const sbMoveCount = () => (sandbox.document.handlers.pointermove || []).length;
       const sbUpCount = () => (sandbox.document.handlers.pointerup || []).length;

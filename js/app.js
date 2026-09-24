@@ -1221,6 +1221,13 @@
     app.curMarkColor = app.MARK_COLORS[app.settings.markColorIdx || 0] || app.MARK_COLORS[0];
     SN.applyEditorTheme(app.settings.editorTheme);
     loadUserSettings();
+    // 文件列表与结果面板接入同一套自绘滚动条（内容长时滑块保底可点长度，不再缩到十几像素）
+    if (SN.scrollbar) {
+      for (const sel of ["#fileList", "#resultView"]) {
+        const sc = SN.$(sel);
+        if (sc) SN.scrollbar.attach(sc, sc.parentElement);
+      }
+    }
 
     SN.$("#eolSel").addEventListener("change", (e) => {
       const d = activeDoc();

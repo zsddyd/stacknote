@@ -67,12 +67,17 @@
     function update() {
       const needV = v.update();
       const needH = h.update();
-      // 自绘滑块浮在内容之上：给宿主让出同宽的槽位（原生滚动条本来就占位），
-      // 否则底部横条会盖住最后一行、右侧竖条会盖住长行行尾。
-      // 让位加在滚动元素自己身上（margin），不能加宿主的 padding：
-      // 编辑器 textarea 是 position:absolute + inset:0，宿主的 padding 对它无效。
-      scroller.classList.toggle("sb-mar-r", needV);
-      scroller.classList.toggle("sb-mar-b", needH);
+      // 自绘滑块浮在内容之上，滚动元素自己让出同宽槽位（原生滚动条本来就占位），
+      // 否则底部横条会盖住最后一行、右侧竖条会盖住行尾。
+      // 用内联样式而不是 CSS 类：容器常带 #fileList{margin:0} 这类 ID 规则，通用类会被压掉；
+      // 值仍写 var(--sb-size)，尺寸的单一来源留在 css/sn.css。
+      scroller.style.marginRight = needV ? "var(--sb-size)" : "";
+      scroller.style.marginBottom = needH ? "var(--sb-size)" : "";
+      // 编辑器 textarea 还显式写了 width/height:100%，要改回 auto 才缩得动
+      if (scroller.tagName === "TEXTAREA") {
+        scroller.style.width = needV ? "auto" : "";
+        scroller.style.height = needH ? "auto" : "";
+      }
     }
 
     function destroy() {
@@ -81,7 +86,10 @@
       v.track.remove();
       h.track.remove();
       scroller.classList.remove("sb-native-hidden");
-      scroller.classList.remove("sb-mar-r", "sb-mar-b");
+      scroller.style.marginRight = "";
+      scroller.style.marginBottom = "";
+      scroller.style.width = "";
+      scroller.style.height = "";
       host.classList.remove("sb-touch");
       if (typeof scroller.removeEventListener === "function") scroller.removeEventListener("scroll", onScroll);
       if (api._ro) api._ro.disconnect();
