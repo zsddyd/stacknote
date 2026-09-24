@@ -183,7 +183,11 @@ label{user-select:none}
 
 /* ---------- 停靠 ---------- */
 .dockhead{display:flex;align-items:center;justify-content:space-between;background:var(--panel);
-  border-bottom:1px solid var(--border);padding:2px 6px;user-select:none}
+  border-bottom:1px solid var(--border);padding:2px 6px;user-select:none;position:relative}
+/* 查找进度：标题右侧一行文字 + 贴在标题栏下沿的 2px 进度条（颜色跟随主题 accent） */
+.dockprog{flex:1;margin-left:10px;font-size:12px;color:var(--text-weak);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dockprogbar{position:absolute;left:0;bottom:-1px;height:2px;width:0;background:var(--accent)}
 /* 停靠窗正文：与里层滚动容器等大，自绘滚动条（js/scrollbar.js）以它为定位基准叠滑块。
    不加 overflow，滚动交给里层的 #fileList / #resultView，触摸滚动与键盘翻页都不受影响。 */
 .dockbody{flex:1;min-height:0;position:relative;display:flex}
