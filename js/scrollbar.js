@@ -52,7 +52,8 @@
     function onScroll() {
       if (raf) return;      // 滚动事件很密（移动端尤甚），合并到一帧一次，避免反复读布局
       const rafFn = window.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
-      raf = rafFn(() => { raf = 0; update(); });
+      // 只挪滑块：几何来自缓存，滚动路径不读 clientHeight/scrollHeight，移动端不会再每帧强制布局
+      raf = rafFn(() => { raf = 0; v.render(); h.render(); });
     }
     scroller.addEventListener("scroll", onScroll, { passive: true });
     if (typeof window.ResizeObserver === "function") {
@@ -108,48 +109,56 @@
 
       const pos = () => (isV ? scroller.scrollTop : scroller.scrollLeft) || 0;
       const setPos = (p) => { if (isV) scroller.scrollTop = p; else scroller.scrollLeft = p; };
-      const sizes = () => {
+      // 几何缓存：量一次会读 offsetHeight / scrollHeight（强制同步布局），所以只在尺寸或内容变化时量，
+      // 滚动时只用缓存 + scrollTop 挪滑块。移动端滚动事件很密，每帧强制布局正是真机滚动卡顿的常见来源。
+      const geo = { measured: false, need: false, track: 0, len: 0, maxPos: 0, maxScroll: 0 };
+
+      function measure() {
         const client = (isV ? scroller.clientHeight : scroller.clientWidth) || 0;
         const total = (isV ? scroller.scrollHeight : scroller.scrollWidth) || 0;
         // 无布局宿主（自检桩）里轨道量不到长度，退化成按视口长算，保证纯函数可测
         const tlen = (isV ? track.offsetHeight : track.offsetWidth) || client;
-        return { client: client, total: total, track: tlen };
-      };
+        geo.track = tlen;
+        geo.need = tlen > 0 && total - client > 1;
+        geo.len = geo.need ? thumbLen(client, total, tlen) : 0;
+        geo.maxPos = Math.max(0, tlen - geo.len);
+        geo.maxScroll = Math.max(0, total - client);
+        geo.measured = true;
+        return geo.need;
+      }
 
-      function update() {
-        const m = sizes();
-        const need = m.track > 0 && m.total - m.client > 1;
-        track.classList.toggle("off", !need);
-        if (!need) return false;
-        const len = thumbLen(m.client, m.total, m.track);
-        const maxPos = Math.max(0, m.track - len);
-        const maxScroll = Math.max(0, m.total - m.client);
+      // 只挪滑块，不读任何布局尺寸（滚动路径走这里）
+      function render() {
+        if (!geo.measured) measure();
+        track.classList.toggle("off", !geo.need);
+        if (!geo.need) return false;
         const cur = pos();
-        const off = maxScroll > 0 ? maxPos * (cur / maxScroll) : 0;
+        const off = geo.maxScroll > 0 ? geo.maxPos * (cur / geo.maxScroll) : 0;
         if (isV) {
-          thumb.style.height = len + "px";
+          thumb.style.height = geo.len + "px";
           thumb.style.transform = "translateY(" + off.toFixed(2) + "px)";
         } else {
-          thumb.style.width = len + "px";
+          thumb.style.width = geo.len + "px";
           thumb.style.transform = "translateX(" + off.toFixed(2) + "px)";
         }
-        thumb.setAttribute("aria-valuenow", String(Math.round(maxScroll > 0 ? (cur / maxScroll) * 100 : 0)));
+        thumb.setAttribute("aria-valuenow", String(Math.round(geo.maxScroll > 0 ? (cur / geo.maxScroll) * 100 : 0)));
         return true;
       }
+
+      function update() { const need = measure(); render(); return need; }
 
       // 拖动滑块：按「可滚动距离 / 可移动轨道距离」换算，保持跟手
       thumb.addEventListener("pointerdown", (ev) => {
         if (ev.button > 0) return;
-        const m = sizes();
-        const len = thumbLen(m.client, m.total, m.track);
-        const maxPos = Math.max(1, m.track - len);
-        const maxScroll = Math.max(1, m.total - m.client);
+        if (!geo.measured) measure();
+        const maxPos = Math.max(1, geo.maxPos);
+        const maxScroll = Math.max(1, geo.maxScroll);
         const start = isV ? ev.clientY : ev.clientX;
         const startScroll = pos();
         const k = maxScroll / maxPos;
         const onMove = (e2) => {
           setPos(startScroll + ((isV ? e2.clientY : e2.clientX) - start) * k);
-          update();
+          render();
         };
         const onEnd = () => {
           thumb.classList.remove("dragging");
@@ -173,13 +182,13 @@
         const r = track.getBoundingClientRect ? track.getBoundingClientRect() : null;
         const clickPos = r ? (isV ? ev.clientY - r.top : ev.clientX - r.left) : 0;
         const thumbPos = isV ? thumb.offsetTop : thumb.offsetLeft;
-        const step = (isV ? scroller.clientHeight : scroller.clientWidth) * 0.9;
+        const step = (geo.measured ? geo.track : (isV ? scroller.clientHeight : scroller.clientWidth)) * 0.9;
         setPos(pos() + (clickPos < thumbPos ? -step : step));
-        update();
+        render();
         ev.preventDefault();
       });
 
-      return { track: track, thumb: thumb, update: update };
+      return { track: track, thumb: thumb, update: update, render: render };
     }
   }
 

@@ -637,7 +637,14 @@
   }
 
   async function handleOpenFiles(files) {
-    for (const f of Array.from(files)) await importFile(f, app.pendingOpenMode);
+    const list = Array.from(files);
+    for (let i = 0; i < list.length; i++) {
+      // 多个文件时显示进度：逐个导入之间会让出主线程，但整体仍要跑一会儿，
+      // 状态栏写清「正在打开第几个」比让用户盯着没反应的界面好
+      if (list.length > 1) setMsg("正在打开 " + (i + 1) + "/" + list.length + "：" + list[i].name);
+      await importFile(list[i], app.pendingOpenMode);
+      await new Promise(r => requestAnimationFrame(r));
+    }
     app.pendingOpenMode = "auto";
   }
 

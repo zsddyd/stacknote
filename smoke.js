@@ -510,6 +510,27 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     SN.cmd.toggleResultDock(true);
   }
 
+  // 查找进度：跨文档查找时必须在结果面板上看得见（曾经只写状态栏文字，而大文件按 8MB 分块，
+  // 小块文件只回调一次，用户基本看不到）
+  {
+    const idxHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    const cssSrc = fs.readFileSync(path.join(__dirname, "css/sn.css"), "utf8");
+    const app2Src = fs.readFileSync(path.join(__dirname, "js/app2.js"), "utf8");
+    assert(/id="dockProg"/.test(idxHtml) && /id="dockProgBar"/.test(idxHtml),
+      "index.html 提供查找进度的文字与进度条元素");
+    assert(/\.dockprog\{[^}]*color:var\(--text-weak\)/.test(cssSrc), "进度文字用弱化文字色（跟随主题）");
+    assert(/\.dockprogbar\{[^}]*background:var\(--accent\)/.test(cssSrc), "进度条用主题 accent 色");
+    assert(/\.dockhead\{[^}]*position:relative/.test(cssSrc), "标题栏给出定位上下文，进度条贴在它下沿");
+    assert(/function setFindProgress/.test(app2Src) && /function clearFindProgress/.test(app2Src),
+      "查找进度有设置与清理两个入口");
+    assert(/finally\s*\{[\s\S]{0,90}clearFindProgress\(\)/.test(app2Src),
+      "查找进度用 finally 收尾：检索抛错也不留一条卡住的进度条");
+    assert(/setFindProgress\(null, res\.length, dd\.name/.test(app2Src),
+      "每个文件开工前先写一次进度（小块文件只回调一次，否则看不到）");
+    assert(/已找到 " \+ found \+ " 处/.test(app2Src) && /\/" \+ totalFiles/.test(app2Src),
+      "进度文案含已找到数量与多文件序号");
+  }
+
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
   {
     const handlers = documentStub.handlers.keydown || [];
@@ -1042,6 +1063,15 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
         "让位用内联样式 + var(--sb-size)（尺寸单一来源仍在 CSS，且压得过 #id{margin:0}）");
       assert(/scroller\.tagName === "TEXTAREA"/.test(scrollbarSrc),
         "textarea 让位时额外把 width/height 改回 auto（它显式写了 100%）");
+      // 滚动路径不得读布局尺寸：移动端滚动事件每帧触发，读一次 clientHeight 就强制一次同步布局
+      assert(/rafFn\(\(\) => \{ raf = 0; v\.render\(\); h\.render\(\); \}\)/.test(scrollbarSrc),
+        "scroll 回调只调 render（挪滑块），不重新量几何");
+      const rStart = scrollbarSrc.indexOf("function render()");
+      const renderSrc = scrollbarSrc.slice(rStart, scrollbarSrc.indexOf("function update()", rStart));
+      assert(renderSrc.length > 0 &&
+        !/clientHeight|clientWidth|scrollHeight|scrollWidth|offsetHeight|offsetWidth/.test(renderSrc),
+        "render 内不读任何布局尺寸（几何只在 measure 里量）");
+      assert(/function measure\(\)[\s\S]{0,500}clientHeight/.test(scrollbarSrc), "measure 才负责读布局尺寸");
       // 纯函数：长度下限按「窗口像素」兜底，而不是跟着内容继续等比缩短
       const TL = SN.scrollbar.thumbLen;
       assert(SN.scrollbar.MIN_THUMB >= 44, "滑块最小长度不小于 44px（WCAG 2.5.5 目标尺寸），实际=" + SN.scrollbar.MIN_THUMB);
@@ -1068,6 +1098,10 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
       const appSrc = fs.readFileSync(path.join(__dirname, "js/app.js"), "utf8");
       assert(/\[\s*"#fileList",\s*"#resultView"\s*\][\s\S]{0,300}SN\.scrollbar\.attach/.test(appSrc),
         "js/app.js 让文件列表与结果面板复用同一套自绘滚动条");
+      assert(/正在打开 " \+ \(i \+ 1\) \+ "\/" \+ list\.length/.test(appSrc),
+        "一次打开多个文件时状态栏显示「正在打开第几个」（手机上一次开好几个不至于像卡死）");
+      assert(/正在建立行索引 " \+ Math\.round\(p \* 100\)/.test(bigtextSrc),
+        "大文件建索引显示百分比进度（分片扫描期间有可见反馈）");
       const idxHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
       assert(idxHtml.indexOf("js/scrollbar.js") >= 0, "index.html 引入了 js/scrollbar.js");
       assert(idxHtml.indexOf("js/scrollbar.js") < idxHtml.indexOf("js/editor.js") &&
