@@ -488,6 +488,28 @@ assert(SN.getTheme("ruby_blue").id === "default" && SN.getTheme("twilight").id =
     assert(byText(documentStub.querySelector("#menubar"), "视图能力表…"), "「关于」菜单下有视图能力表入口");
   }
 
+  // 停靠窗开关：初始隐藏时点一次必须"显示"（曾经把判断写成 dock.classList.contains("hidden")，
+  // 语义反了，于是「视图 → 文件列表窗口」点了没反应；关闭按钮走 forceHide 不受影响）
+  {
+    const fileDock = documentStub.querySelector("#fileDock");
+    const bottomDock = documentStub.querySelector("#bottomDock");
+    fileDock.classList.add("hidden");
+    SN.cmd.toggleFileDock();
+    assert(!fileDock.classList.contains("hidden"), "文件列表窗口：初始隐藏时点一次就展开");
+    SN.cmd.toggleFileDock();
+    assert(fileDock.classList.contains("hidden"), "文件列表窗口：再点一次收起");
+    SN.cmd.toggleFileDock(false);
+    assert(!fileDock.classList.contains("hidden"), "文件列表窗口：forceHide=false 强制展开");
+    SN.cmd.toggleFileDock(true);
+    assert(fileDock.classList.contains("hidden"), "文件列表窗口：forceHide=true（关闭按钮）强制收起");
+    bottomDock.classList.add("hidden");
+    SN.cmd.toggleResultDock();
+    assert(!bottomDock.classList.contains("hidden"), "查找结果面板：初始隐藏时点一次就展开");
+    SN.cmd.toggleResultDock();
+    assert(bottomDock.classList.contains("hidden"), "查找结果面板：再点一次收起");
+    SN.cmd.toggleResultDock(true);
+  }
+
   // 真实键位链路：document 上的 keydown 监听器应经由快捷键表分发
   {
     const handlers = documentStub.handlers.keydown || [];

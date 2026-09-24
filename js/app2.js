@@ -198,7 +198,9 @@
 
   cmd.toggleFileDock = function (forceHide) {
     const dock = $("#fileDock");
-    const hide = forceHide === true ? true : forceHide === false ? false : dock.classList.contains("hidden");
+    // 取反才对：初始带 hidden 时点一次应该"显示"（hide=false）。
+    // 这里原先写成 contains("hidden")，于是「视图 → 文件列表窗口」点了没反应（关闭按钮用 forceHide 不受影响）。
+    const hide = forceHide === true ? true : forceHide === false ? false : !dock.classList.contains("hidden");
     dock.classList.toggle("hidden", hide);
     if (!hide) updateFileList();
     rebuildUi();
@@ -206,7 +208,8 @@
   cmd.toggleResultDock = function (forceHide) {
     const dock = $("#bottomDock");
     const split = $("#dockSplit");
-    const hide = forceHide === true ? true : forceHide === false ? false : dock.classList.contains("hidden");
+    // 同上：取反决定这一下是收起还是展开
+    const hide = forceHide === true ? true : forceHide === false ? false : !dock.classList.contains("hidden");
     dock.classList.toggle("hidden", hide);
     if (split) split.classList.toggle("hidden", hide);
     rebuildUi();
