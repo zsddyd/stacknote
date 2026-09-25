@@ -637,7 +637,14 @@
   }
 
   async function handleOpenFiles(files) {
-    for (const f of Array.from(files)) await importFile(f, app.pendingOpenMode);
+    const list = Array.from(files);
+    for (let i = 0; i < list.length; i++) {
+      // 多个文件时显示进度：逐个导入之间会让出主线程，但整体仍要跑一会儿，
+      // 状态栏写清「正在打开第几个」比让用户盯着没反应的界面好
+      if (list.length > 1) setMsg("正在打开 " + (i + 1) + "/" + list.length + "：" + list[i].name);
+      await importFile(list[i], app.pendingOpenMode);
+      await new Promise(r => requestAnimationFrame(r));
+    }
     app.pendingOpenMode = "auto";
   }
 
@@ -1221,6 +1228,13 @@
     app.curMarkColor = app.MARK_COLORS[app.settings.markColorIdx || 0] || app.MARK_COLORS[0];
     SN.applyEditorTheme(app.settings.editorTheme);
     loadUserSettings();
+    // 文件列表与结果面板接入同一套自绘滚动条（内容长时滑块保底可点长度，不再缩到十几像素）
+    if (SN.scrollbar) {
+      for (const sel of ["#fileList", "#resultView"]) {
+        const sc = SN.$(sel);
+        if (sc) SN.scrollbar.attach(sc, sc.parentElement);
+      }
+    }
 
     SN.$("#eolSel").addEventListener("change", (e) => {
       const d = activeDoc();

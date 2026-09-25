@@ -69,7 +69,13 @@
       // 标签栏：未选中标签略沉，选中标签与编辑区同底，靠 accent 顶条区分
       "--tab-bg": mixHex(bg, 0.10, "#000000"),
       "--tab-bg-active": bg,
-      "--danger": light ? "#C0392B" : "#E06C75"
+      "--danger": light ? "#C0392B" : "#E06C75",
+      // 滚动条：各平台原生绘制差异大（Windows 是常驻 15px 槽位且带步进箭头、macOS 是 overlay 会淡出、
+      // Linux 随 GTK 主题变），统一自绘（见 css/sn.css 的 ::-webkit-scrollbar），这里只推导颜色。
+      // 轨道保持透明：滑块要在编辑区底色与面板/菜单底色上都看得见，0.34 / 0.50 两档对深浅主题都够用
+      "--sb-track": "transparent",
+      "--sb-thumb": mixHex(bg, 0.34, toward),
+      "--sb-thumb-hover": mixHex(bg, 0.50, toward)
     };
   }
 

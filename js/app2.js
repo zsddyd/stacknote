@@ -198,7 +198,9 @@
 
   cmd.toggleFileDock = function (forceHide) {
     const dock = $("#fileDock");
-    const hide = forceHide === true ? true : forceHide === false ? false : dock.classList.contains("hidden");
+    // 取反才对：初始带 hidden 时点一次应该"显示"（hide=false）。
+    // 这里原先写成 contains("hidden")，于是「视图 → 文件列表窗口」点了没反应（关闭按钮用 forceHide 不受影响）。
+    const hide = forceHide === true ? true : forceHide === false ? false : !dock.classList.contains("hidden");
     dock.classList.toggle("hidden", hide);
     if (!hide) updateFileList();
     rebuildUi();
@@ -206,7 +208,8 @@
   cmd.toggleResultDock = function (forceHide) {
     const dock = $("#bottomDock");
     const split = $("#dockSplit");
-    const hide = forceHide === true ? true : forceHide === false ? false : dock.classList.contains("hidden");
+    // 同上：取反决定这一下是收起还是展开
+    const hide = forceHide === true ? true : forceHide === false ? false : !dock.classList.contains("hidden");
     dock.classList.toggle("hidden", hide);
     if (split) split.classList.toggle("hidden", hide);
     rebuildUi();
@@ -520,6 +523,34 @@
   // 都在同一个对话框里输入关键字，再用两个按钮选择作用域：
   //   当前文件中查找 / 查找所有打开文件
   // opts: { scope: "doc"(默认) | "docs" }
+  // 查找进度：标题栏右侧一行文字 + 贴在标题栏下沿的 2px 进度条。
+  // pct 为 null 表示「该文件刚开工、还拿不到百分比」（大文件按 8MB 分块，小块文件只回调一次，
+  // 若不额外写一次开局状态，用户就只等到结束前一闪而过的那一下）。
+  function setFindProgress(pct, found, name, doneFiles, totalFiles) {
+    const text = SN.$("#dockProg");
+    if (text) {
+      const parts = [];
+      if (totalFiles > 1) parts.push("(" + Math.min(doneFiles + 1, totalFiles) + "/" + totalFiles + ")");
+      parts.push("正在检索 " + name + (typeof pct === "number" ? " " + Math.round(pct) + "%" : "…"));
+      parts.push("· 已找到 " + found + " 处");
+      text.textContent = parts.join(" ");
+      text.classList.remove("hidden");
+    }
+    const bar = SN.$("#dockProgBar");
+    if (bar) {
+      const perFile = totalFiles > 0 ? 1 / totalFiles : 1;
+      const cur = typeof pct === "number" ? perFile * Math.min(1, pct / 100) : 0;
+      bar.style.width = Math.round(Math.min(1, doneFiles * perFile + cur) * 100) + "%";
+      bar.classList.remove("hidden");
+    }
+  }
+  function clearFindProgress() {
+    const text = SN.$("#dockProg");
+    if (text) { text.classList.add("hidden"); text.textContent = ""; }
+    const bar = SN.$("#dockProgBar");
+    if (bar) { bar.classList.add("hidden"); bar.style.width = "0"; }
+  }
+
   dlg.find = function (opts) {
     const o = typeof opts === "string" ? { scope: opts === "opendocs" ? "docs" : "doc" } : (opts || {});
     const ed = SN.activeEditor();
@@ -620,24 +651,37 @@
           const res = [];
           // 跨文档查找覆盖所有「支持查找」的文档（能力表判定，Hex 自动排除）
           const docList = sc === "docs" ? app.docs.filter(x => SN.caps.can("find", x)) : [d];
-          for (const dd of docList) {
-            const ad = SN.views.of(dd);
-            // 大文本：正文未整篇解码，必须走适配器的分块流式检索（只占临时内存）
-            if (ad.search) {
-              const msg = SN.$("#msgLabel");
-              const rows = await ad.search(dd, app.findOpt.keyword, (pct, n) => {
-                if (msg) msg.textContent = "正在检索 " + dd.name + " " + pct + "% · 已找到 " + n + " 处";
-              });
-              for (const row of rows) res.push({ docId: dd.id, file: dd.name, line: row.line, content: row.snippet });
-              continue;
+          // 进度要看得见：先把结果面板打开，进度文字与进度条都显示在它的标题栏上。
+          // 大文件的分块检索可能跑很久，且只回调一次（分块 8MB，小文件只有一块），
+          // 所以每个文件开始前也先写一次状态，别让用户只等到最后一闪而过的百分比。
+          const dock = SN.$("#bottomDock"), split = SN.$("#dockSplit");
+          if (dock) dock.classList.remove("hidden");
+          if (split) split.classList.remove("hidden");
+          let doneFiles = 0;
+          try {
+            for (const dd of docList) {
+              const ad = SN.views.of(dd);
+              setFindProgress(null, res.length, dd.name, doneFiles, docList.length);
+              // 大文本：正文未整篇解码，必须走适配器的分块流式检索（只占临时内存）
+              if (ad.search) {
+                const rows = await ad.search(dd, app.findOpt.keyword, (pct, n) => {
+                  setFindProgress(pct, res.length + n, dd.name, doneFiles, docList.length);
+                });
+                for (const row of rows) res.push({ docId: dd.id, file: dd.name, line: row.line, content: row.snippet });
+                doneFiles++;
+                continue;
+              }
+              const ms = findMatches(dd.content || "", app.findOpt.keyword, app.findOpt);
+              for (const mm of ms) {
+                const lineStart = dd.content.lastIndexOf("\n", mm.start - 1) + 1;
+                const lineEnd = dd.content.indexOf("\n", mm.start);
+                res.push({ docId: dd.id, file: dd.name, line: mm.line, start: mm.start, end: mm.end,
+                  content: dd.content.slice(lineStart, lineEnd < 0 ? undefined : lineEnd) });
+              }
+              doneFiles++;
             }
-            const ms = findMatches(dd.content || "", app.findOpt.keyword, app.findOpt);
-            for (const mm of ms) {
-              const lineStart = dd.content.lastIndexOf("\n", mm.start - 1) + 1;
-              const lineEnd = dd.content.indexOf("\n", mm.start);
-              res.push({ docId: dd.id, file: dd.name, line: mm.line, start: mm.start, end: mm.end,
-                content: dd.content.slice(lineStart, lineEnd < 0 ? undefined : lineEnd) });
-            }
+          } finally {
+            clearFindProgress();   // 出错也要收掉，别留一条卡住的进度条
           }
           showResults(res, app.findOpt.keyword);
           // 当前文件作用域下，若该视图没有光标（大文件只读），自动定位到第一处命中，

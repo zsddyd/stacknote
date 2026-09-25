@@ -35,11 +35,15 @@
       <div id="bottomDock" class="hidden">
         <div class="dockhead">
           <span class="docktitle">结果</span>
+          <!-- 查找进度：文字 + 底部 2px 进度条（跨文档查找时按「已完成文件 + 当前文件百分比」推进） -->
+          <span id="dockProg" class="dockprog hidden"></span>
+          <div id="dockProgBar" class="dockprogbar hidden"></div>
           <span class="docktools">
             <button class="dockclean" title="清除">×</button>
           </span>
         </div>
-        <div id="resultView"></div>
+        <!-- .dockbody 与 #resultView 等大：自绘滚动条（js/scrollbar.js）以它为定位基准叠滑块 -->
+        <div class="dockbody"><div id="resultView"></div></div>
       </div>
     </div>
 
@@ -49,7 +53,7 @@
         <span class="docktitle">文件列表</span>
         <span class="docktools"><button class="dockclean" title="关闭">×</button></span>
       </div>
-      <ul id="fileList"></ul>
+      <div class="dockbody"><ul id="fileList"></ul></div>
     </aside>
   </div>
 
@@ -79,6 +83,7 @@
 <input type="file" id="dirInput" webkitdirectory hidden>
 
 <script src="js/util.js"></script>
+<script src="js/scrollbar.js"></script>
 <script src="js/iconui.js"></script>
 <script src="js/viewcaps.js"></script>
 <script src="js/shortcuts.js"></script>

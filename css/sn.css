@@ -3,19 +3,21 @@
   --border:#D1D1D1;
   --btn-bg:#E0E0E0;
   --btn-hover-a:#FFFFFF; --btn-hover-b:#E0E0E0;
-  --selection:#B27326;
+  --selection:#8A5E21;
   --panel:#EDEDED;
   --panel2:#FFFFFF;
-  --text:#000;
-  --text-weak:#6B6B6B;
-  --hl-row:#FFEBCB;
+  --text:#111214;
+  --text-weak:#757677;
+  --hl-row:#FEF1E0;
   --hlw:#FFEB3B;
   --tab-bg:#E6E6E6; --tab-bg-active:#FFFFFF;
   --danger:#C0392B;
+  /* 滚动条（自绘）：尺寸固定不可主题化，颜色由 themes.js 按主题写入；这里的颜色只是首屏兜底（= Default 主题） */
+  --sb-track:transparent; --sb-thumb:#A8A8A8; --sb-thumb-hover:#808080; --sb-size:12px;
   /* 以下变量由 themes.js 按主题写入 <html> 内联样式；这里的值只是首屏兜底（= Default 主题） */
   --ed-bg:#FFFFFF; --ed-fg:#111214;
   --ed-line-num:#808080; --ed-gutter-bg:#f0f0f0;
-  --ed-caret:#000;
+  --ed-caret:#111214;
   --ed-selection:rgba(0,204,255,.30);
   --ed-active-line:rgba(17,18,20,.05);
   --ed-fold-fg:#888;
@@ -38,6 +40,55 @@ button:disabled{opacity:.45;cursor:default}
 select,input[type=text],input[type=number],textarea{font:inherit;color:var(--text);
   background:var(--panel2);border:1px solid var(--border);border-radius:2px;padding:2px 4px}
 label{user-select:none}
+
+/* ---------- 滚动条：统一自绘，跨平台一致 ----------
+   原生滚动条各平台绘制差得远：Windows/Chromium 是常驻槽位且带上下步进箭头，macOS 是 overlay 会在
+   停止滚动后淡出，Linux 随 GTK 主题走；同一个页面在三处看起来是三种东西。这里统一自绘：
+   颜色由 themes.js 按主题推导后写入 <html> 内联样式（:root 里的只是首屏兜底 = Default 主题），
+   粗细固定为 --sb-size，垂直/水平同一套，箭头与交汇方块一律不画。
+   分工：Chrome/Edge/Safari 用下面的 ::-webkit-scrollbar 精确绘制；Firefox 不支持该伪元素，
+   在紧随其后的 @supports 里退回标准属性。 */
+::-webkit-scrollbar{width:var(--sb-size);height:var(--sb-size);background:transparent}
+::-webkit-scrollbar-track{background:var(--sb-track)}
+/* 滑块用透明边框 + background-clip 内缩：视觉比槽位窄，可拖动的热区仍是整条 */
+::-webkit-scrollbar-thumb{background-color:var(--sb-thumb);background-clip:content-box;
+  border:2px solid transparent;border-radius:3px}
+::-webkit-scrollbar-thumb:hover,::-webkit-scrollbar-thumb:active{background-color:var(--sb-thumb-hover)}
+/* 平台差异最大的两处：步进箭头按钮、垂直与水平的交汇方块，都不画 */
+::-webkit-scrollbar-button{display:none}
+::-webkit-scrollbar-corner{background:transparent}
+/* 编辑区与大文件视口：轨道铺一层编辑区底色，免得下方「不滚动的高亮文本层」从透明槽位里透出来 */
+.ed-input::-webkit-scrollbar-track,.bg-viewport::-webkit-scrollbar-track{background:var(--ed-bg)}
+/* Firefox 没有 ::-webkit-scrollbar，退回标准属性：颜色同样跟随主题（滑块 / 轨道），
+   粗细只有 thin 一档可收窄，hover 态无法自定义 —— 已尽量贴近自绘观感 */
+@supports not (selector(::-webkit-scrollbar)){
+  *{scrollbar-width:thin;scrollbar-color:var(--sb-thumb) var(--sb-track)}
+}
+/* 自绘滚动条（js/scrollbar.js）：给内容可能极长的容器兜住滑块的最小可点长度。
+   原生滑块按「视口/内容」等比缩，Chromium 又忽略 ::-webkit-scrollbar-thumb 的 min-height
+   （实测内容 44 万 px、视口 441px 时仍是 13px），所以这些容器隐藏原生滚动条，
+   改用下面这层 overlay 滑块：长度 = max(48px, 视口/内容 × 轨道)。 */
+.sb-native-hidden{scrollbar-width:none}
+.sb-native-hidden::-webkit-scrollbar{width:0;height:0}
+.sb-track{position:absolute;z-index:3}
+.sb-track.off{display:none}
+.sb-track.sb-v{top:0;right:0;bottom:0;width:var(--sb-size)}
+.sb-track.sb-h{left:0;right:0;bottom:0;height:var(--sb-size)}
+/* 内缩 2px：视觉宽度 = --sb-size - 4 = 8px，与上面 ::-webkit-scrollbar-thumb 的方案一致 */
+.sb-thumb{position:absolute;background-color:var(--sb-thumb);border-radius:3px;touch-action:none}
+.sb-track.sb-v .sb-thumb{left:2px;right:2px;top:0}
+.sb-track.sb-h .sb-thumb{top:2px;bottom:2px;left:0}
+.sb-thumb:hover,.sb-thumb.dragging{background-color:var(--sb-thumb-hover)}
+/* 编辑区与大文件视口：overlay 压在内容之上，轨道要铺编辑区底色，免得下面的高亮层从槽位透出来 */
+.ed-main .sb-track,.bigview .sb-track{background:var(--ed-bg)}
+/* 触屏（安卓/iOS）：轨道不拦事件，整片区域照旧触摸滚动，只有滑块可拖；
+   滑块热区往外放大 8px（视觉不变，命中区 8+16 = 24px），手指才按得住 */
+.sb-touch .sb-track{pointer-events:none}
+.sb-touch .sb-thumb{pointer-events:auto}
+.sb-touch .sb-thumb::after{content:"";position:absolute;inset:-8px}
+/* 让位（滚动元素让出 --sb-size 宽的槽位，滑块不盖内容）由 js/scrollbar.js 写成内联样式：
+   容器普遍带 #id{margin:0} 这类高特异性规则，放在 CSS 类里会被压掉。 */
+
 #app{display:flex;flex-direction:column;height:100vh}
 
 /* ---------- 菜单栏 ---------- */
@@ -132,7 +183,14 @@ label{user-select:none}
 
 /* ---------- 停靠 ---------- */
 .dockhead{display:flex;align-items:center;justify-content:space-between;background:var(--panel);
-  border-bottom:1px solid var(--border);padding:2px 6px;user-select:none}
+  border-bottom:1px solid var(--border);padding:2px 6px;user-select:none;position:relative}
+/* 查找进度：标题右侧一行文字 + 贴在标题栏下沿的 2px 进度条（颜色跟随主题 accent） */
+.dockprog{flex:1;margin-left:10px;font-size:12px;color:var(--text-weak);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dockprogbar{position:absolute;left:0;bottom:-1px;height:2px;width:0;background:var(--accent)}
+/* 停靠窗正文：与里层滚动容器等大，自绘滚动条（js/scrollbar.js）以它为定位基准叠滑块。
+   不加 overflow，滚动交给里层的 #fileList / #resultView，触摸滚动与键盘翻页都不受影响。 */
+.dockbody{flex:1;min-height:0;position:relative;display:flex}
 .dockclean{border:0;background:none;font-size:14px;padding:0 6px}
 #fileDock{width:230px;flex:0 0 auto;border-left:1px solid var(--border);background:var(--panel2);
   display:flex;flex-direction:column;min-height:0}

@@ -171,6 +171,8 @@
     const inner = el("div", { class: "bg-inner", style: "position:relative" });
     viewport.appendChild(inner);
     page.appendChild(viewport);
+    // 自绘滚动条：大文件内容高度动辄几十万像素，原生滑块会短到没法用鼠标点（见 js/scrollbar.js）
+    const sb = SN.scrollbar ? SN.scrollbar.attach(viewport, page) : null;
 
     let lc = 1;
     let raf = null;
@@ -228,6 +230,7 @@
       inner.style.height = (lc * rowH) + "px";
       inner.style.width = contentWidth() + "px";
       paint();
+      if (sb) sb.update();
     }
     function visible() {
       const top = Math.max(0, Math.floor(viewport.scrollTop / rowH) - OVERSCAN);
@@ -579,6 +582,8 @@
       paintPos();              // 行索引就绪后才算得出总行数
     }, (p) => {
       if (!(p < 1)) return;
+      // 大文件建索引要扫全文（分片让出主线程），给个百分比才知道它还在干活
+      setBigStatus("正在建立行索引 " + Math.round(p * 100) + "%");
     });
     return page;
   };
